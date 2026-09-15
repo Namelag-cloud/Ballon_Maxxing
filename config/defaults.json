@@ -1,0 +1,56 @@
+{
+  "mode": "live",
+  "capture": {
+    "backend": "mss",
+    "region": {"top": 0, "left": 0, "width": 1920, "height": 1080},
+    "fps_limit": null
+  },
+  "colors": {
+    "red": {"lower_hsv": [0, 120, 100], "upper_hsv": [10, 255, 255]},
+    "green": {"lower_hsv": [35, 120, 100], "upper_hsv": [85, 255, 255]},
+    "blue": {"lower_hsv": [100, 120, 100], "upper_hsv": [130, 255, 255]},
+    "yellow": {"lower_hsv": [20, 120, 100], "upper_hsv": [35, 255, 255]},
+    "white": {"lower_hsv": [0, 0, 200], "upper_hsv": [180, 30, 255]}
+  },
+  "detection": {
+    "min_area": 500,
+    "max_area": 50000,
+    "min_confidence": 0.7,
+    "morphology_kernel": 3
+  },
+  "outline": {
+    "enabled": true,
+    "min_white_ratio": 0.15,
+    "min_contrast": 30,
+    "border_sample_width": 3
+  },
+  "tracking": {
+    "max_distance": 50,
+    "max_frames_missing": 5,
+    "new_track_threshold": 3
+  },
+  "grouping": {
+    "enabled": true,
+    "same_color_only": true,
+    "require_outline": false,
+    "max_pair_distance": 500
+  },
+  "rules": {
+    "click_white": false,
+    "min_size": 200,
+    "max_size": 30000
+  },
+  "input": {
+    "backend": "sendinput",
+    "enabled": true,
+    "click_delay_ms": 0
+  },
+  "debug": {
+    "show_detections": true,
+    "show_bounding_boxes": true,
+    "show_centers": true,
+    "show_colors": true,
+    "show_outline": true,
+    "show_track_ids": true
+  }
+}
