@@ -181,6 +181,68 @@ class TestTrajectory:
         for i in range(1, len(pts)):
             assert pts[i].t >= pts[i - 1].t
 
+    def test_final_timestamp_equals_requested_duration(self):
+        rng = SeededRNG(42)
+        for total_t in [0.1, 0.3, 0.5, 1.0, 2.0]:
+            pts = generate_trajectory(0, 0, 500, 500, total_t, rng, num_points=20)
+            assert len(pts) >= 2
+            assert abs(pts[-1].t - total_t) < 0.001, (
+                f"final {pts[-1].t} != requested {total_t}"
+            )
+
+    def test_segment_durations_sum_to_total(self):
+        rng = SeededRNG(42)
+        for total_t in [0.2, 0.5, 1.0]:
+            pts = generate_trajectory(0, 0, 400, 300, total_t, rng, num_points=20)
+            segment_sum = sum(pts[i].t - pts[i-1].t for i in range(1, len(pts)))
+            assert abs(segment_sum - total_t) < 0.001, (
+                f"segment sum {segment_sum} != total {total_t}"
+            )
+
+    def test_lateral_deviation_bounded(self):
+        rng = SeededRNG(42)
+        for _ in range(100):
+            pts = generate_trajectory(
+                0, 0, 500, 0, 0.5, rng,
+                num_points=20, lateral_deviation_px=5.0,
+            )
+            for pt in pts:
+                assert abs(pt.y) < 30, f"lateral deviation too large: {pt.y}"
+
+    def test_velocity_finite(self):
+        rng = SeededRNG(42)
+        pts = generate_trajectory(0, 0, 500, 500, 0.3, rng, num_points=20)
+        for pt in pts:
+            assert math.isfinite(pt.velocity)
+            assert pt.velocity >= 0
+
+    def test_acceleration_deceleration_profile(self):
+        rng = SeededRNG(42)
+        pts = generate_trajectory(0, 0, 500, 0, 0.5, rng, num_points=20)
+        mid = len(pts) // 2
+        early_v = pts[3].velocity
+        mid_v = pts[mid].velocity
+        late_v = pts[-3].velocity
+        assert mid_v > early_v * 0.5, "should accelerate then decelerate"
+        assert mid_v > late_v * 0.5, "should accelerate then decelerate"
+
+    def test_zero_total_time_returns_single_point(self):
+        rng = SeededRNG(42)
+        pts = generate_trajectory(0, 0, 100, 100, 0.0, rng)
+        assert len(pts) == 1
+        assert pts[0].t == 0.0
+
+    def test_no_variance_produces_uniform_timing(self):
+        rng = SeededRNG(42)
+        pts = generate_trajectory(
+            0, 0, 500, 0, 0.5, rng,
+            num_points=11, velocity_variance=0.0,
+        )
+        for i in range(2, len(pts)):
+            dt = pts[i].t - pts[i-1].t
+            expected_dt = 0.5 / 10
+            assert abs(dt - expected_dt) < 0.0001
+
 
 # ── Jitter Tests ────────────────────────────────────────────────────
 

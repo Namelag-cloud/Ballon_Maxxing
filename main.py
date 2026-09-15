@@ -310,6 +310,8 @@ class Application:
             if not self._running:
                 return
             print("GO — input is now ACTIVE\n")
+            self._start_time = now_monotonic()
+            
         else:
             print("Input is ACTIVE. Move mouse to safe area if needed.\n")
 
@@ -318,6 +320,10 @@ class Application:
 
         try:
             while self._running:
+                if self._duration and (now_monotonic() - self._start_time) >= self._duration:
+                    print(f"\nDuration limit reached ({self._duration}s)")
+                    break
+
                 t_start = now_monotonic()
 
                 frame, capture_ts = self._capture.grab()

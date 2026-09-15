@@ -60,8 +60,20 @@ def generate_trajectory(
     perp_x = -direction_y
     perp_y = direction_x
 
-    points = []
+    n_segments = num_points - 1
+
+    if velocity_variance > 0:
+        raw_weights = []
+        for i in range(n_segments):
+            w = max(0.1, 1.0 + rng.normal(0, velocity_variance * 0.3))
+            raw_weights.append(w)
+        total_weight = sum(raw_weights)
+        segment_times = [(w / total_weight) * total_time_s for w in raw_weights]
+    else:
+        segment_times = [total_time_s / n_segments] * n_segments
+
     cumulative_t = 0.0
+    points = []
 
     for i in range(num_points):
         if i == 0:
@@ -71,42 +83,54 @@ def generate_trajectory(
         else:
             frac = i / (num_points - 1)
 
-        base_x = start_x + dx * frac
-        base_y = start_y + dy * frac
+        progress = _ease_in_out(frac)
 
-        progress_curve = _ease_in_out(frac)
+        base_x = start_x + dx * progress
+        base_y = start_y + dy * progress
+
         noise_scale = math.sin(math.pi * frac) * lateral_deviation_px
         lateral_offset = rng.normal(0, noise_scale) if noise_scale > 0.1 else 0.0
 
         x = base_x + perp_x * lateral_offset
         y = base_y + perp_y * lateral_offset
 
-        segment_time = total_time_s / (num_points - 1)
-        if velocity_variance > 0:
-            speed_factor = 1.0 + rng.normal(0, velocity_variance * 0.3)
-            speed_factor = max(0.5, min(2.0, speed_factor))
-            segment_time *= speed_factor
+        if i > 0:
+            cumulative_t += segment_times[i - 1]
 
-        cumulative_t += segment_time
+        points.append(TrajectoryPoint(x=x, y=y, t=cumulative_t, velocity=0.0))
 
-        if i == 0:
-            velocity = 0.0
-        elif i == num_points - 1:
-            velocity = 0.0
-        else:
-            velocity = distance / total_time_s if total_time_s > 0 else 0.0
+    for i in range(1, len(points) - 1):
+        dt = points[i + 1].t - points[i - 1].t
+        if dt > 0:
+            dist = math.sqrt(
+                (points[i + 1].x - points[i - 1].x) ** 2
+                + (points[i + 1].y - points[i - 1].y) ** 2
+            )
+            points[i] = TrajectoryPoint(
+                x=points[i].x, y=points[i].y, t=points[i].t, velocity=dist / dt
+            )
 
-        points.append(TrajectoryPoint(x=x, y=y, t=cumulative_t, velocity=velocity))
-
-    if endpoint_correction and points:
+    if endpoint_correction and len(points) >= 2:
         last = points[-1]
+        second_last = points[-2]
         correction_strength = 0.7
+        corrected_x = last.x + (end_x - last.x) * correction_strength
+        corrected_y = last.y + (end_y - last.y) * correction_strength
         points[-1] = TrajectoryPoint(
-            x=last.x + (end_x - last.x) * correction_strength,
-            y=last.y + (end_y - last.y) * correction_strength,
-            t=last.t,
+            x=corrected_x,
+            y=corrected_y,
+            t=total_time_s,
             velocity=0.0,
         )
+        dist = math.sqrt(
+            (points[-1].x - second_last.x) ** 2
+            + (points[-1].y - second_last.y) ** 2
+        )
+        dt = points[-1].t - second_last.t
+        if dt > 0:
+            points[-2] = TrajectoryPoint(
+                x=second_last.x, y=second_last.y, t=second_last.t, velocity=dist / dt
+            )
 
     return points
 

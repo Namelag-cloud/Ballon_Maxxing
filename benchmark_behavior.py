@@ -162,6 +162,7 @@ def run_benchmark(n=100000, seed=12345):
     rt_values = []
     click_values = []
     mt_values = []
+    mt_actual_values = []
     total_values = []
     endpoint_errors = []
     endpoint_dx = []
@@ -174,6 +175,11 @@ def run_benchmark(n=100000, seed=12345):
         rt_values.append(action.reaction_time_s * 1000)
         click_values.append(action.click_duration_s * 1000)
         mt_values.append(action.movement_time_s * 1000)
+        if action.trajectory:
+            actual_mt = action.trajectory[-1].t * 1000
+        else:
+            actual_mt = action.movement_time_s * 1000
+        mt_actual_values.append(actual_mt)
         total_values.append(action.total_time_s * 1000)
         endpoint_errors.append(action.endpoint_error_px)
         click_x, click_y = action.click_position
@@ -185,6 +191,7 @@ def run_benchmark(n=100000, seed=12345):
     rt_stats = compute_stats(rt_values)
     click_stats = compute_stats(click_values)
     mt_stats = compute_stats(mt_values)
+    mt_actual_stats = compute_stats(mt_actual_values)
     total_stats = compute_stats(total_values)
     ep_stats = compute_stats(endpoint_errors)
     dx_stats = compute_stats(endpoint_dx)
@@ -227,6 +234,7 @@ def run_benchmark(n=100000, seed=12345):
         "reaction_time": rt_stats,
         "click_duration": click_stats,
         "movement_time": mt_stats,
+        "movement_time_actual": mt_actual_stats,
         "total_action_time": total_stats,
         "endpoint_error": ep_stats,
         "endpoint_error_exceedance_pct": ep_exceed,
@@ -250,7 +258,8 @@ def print_summary(result):
 
     print_stats("Reaction Time (ms)", result["reaction_time"])
     print_stats("Click Duration (ms)", result["click_duration"])
-    print_stats("Movement Time (ms)", result["movement_time"])
+    print_stats("Movement Time Requested (ms)", result["movement_time"])
+    print_stats("Movement Time Actual (ms)", result["movement_time_actual"])
     print_stats("Total Action Time (ms)", result["total_action_time"])
     print_stats("Endpoint Error Radial (px)", result["endpoint_error"])
     print_stats("Endpoint Error DX (px)", result["endpoint_dx"])
