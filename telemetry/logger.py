@@ -7,6 +7,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 from telemetry.timing import now_monotonic
 from telemetry.behavioral import BehavioralExtractor, BehavioralFeatures
 
@@ -24,6 +26,7 @@ class FrameTelemetry:
     tracks_count: int
     clicks_sent: int
     behavioral: BehavioralFeatures
+    action_timestamps: Optional[ActionTimestamps] = None
 
 
 class TelemetryLogger:
@@ -43,6 +46,9 @@ class TelemetryLogger:
         self._csv_writer.writerow([
             "frame_id", "capture_ts", "detection_ts", "decision_ts", "input_ts",
             "processing_ms", "e2e_ms", "detections", "tracks", "clicks",
+            "action_planned", "reaction_start", "reaction_end",
+            "movement_start", "movement_end",
+            "click_down", "click_up", "action_complete",
         ])
 
     @property
@@ -51,6 +57,7 @@ class TelemetryLogger:
 
     def log_frame(self, telem: FrameTelemetry) -> None:
         self._frames.append(telem)
+        ts = telem.action_timestamps
         self._csv_writer.writerow([
             telem.frame_id,
             f"{telem.capture_timestamp:.6f}",
@@ -62,6 +69,14 @@ class TelemetryLogger:
             telem.detections_count,
             telem.tracks_count,
             telem.clicks_sent,
+            f"{ts.action_planned:.6f}" if ts else "",
+            f"{ts.reaction_start:.6f}" if ts else "",
+            f"{ts.reaction_end:.6f}" if ts else "",
+            f"{ts.movement_start:.6f}" if ts else "",
+            f"{ts.movement_end:.6f}" if ts else "",
+            f"{ts.click_down:.6f}" if ts else "",
+            f"{ts.click_up:.6f}" if ts else "",
+            f"{ts.action_complete:.6f}" if ts else "",
         ])
         self._csv_file.flush()
 
@@ -76,6 +91,35 @@ class TelemetryLogger:
         durations = [f.processing_duration for f in self._frames]
         latencies = [f.end_to_end_latency for f in self._frames]
         detect_counts = [f.detections_count for f in self._frames]
+
+        action_timestamps = [
+            f.action_timestamps for f in self._frames if f.action_timestamps
+        ]
+        action_stats = {}
+        if action_timestamps:
+            reaction_times = [
+                ts.reaction_end - ts.reaction_start for ts in action_timestamps
+                if ts.reaction_end > 0 and ts.reaction_start > 0
+            ]
+            movement_times = [
+                ts.movement_end - ts.movement_start for ts in action_timestamps
+                if ts.movement_end > 0 and ts.movement_start > 0
+            ]
+            click_durations = [
+                ts.click_up - ts.click_down for ts in action_timestamps
+                if ts.click_up > 0 and ts.click_down > 0
+            ]
+            total_times = [
+                ts.action_complete - ts.action_planned for ts in action_timestamps
+                if ts.action_complete > 0 and ts.action_planned > 0
+            ]
+            action_stats = {
+                "total_actions": len(action_timestamps),
+                "reaction_time_ms": _stats_list(reaction_times, 1000) if reaction_times else None,
+                "movement_time_ms": _stats_list(movement_times, 1000) if movement_times else None,
+                "click_duration_ms": _stats_list(click_durations, 1000) if click_durations else None,
+                "total_action_time_ms": _stats_list(total_times, 1000) if total_times else None,
+            }
 
         return {
             "total_frames": len(self._frames),
@@ -96,6 +140,7 @@ class TelemetryLogger:
                 "p99": float(np.percentile(latencies, 99)),
             },
             "avg_detections_per_frame": float(np.mean(detect_counts)),
+            "action_timing": action_stats,
             "behavioral": asdict(self._behavioral.extract(len(detect_counts))),
         }
 
@@ -109,4 +154,15 @@ class TelemetryLogger:
         self.save()
 
 
-import numpy as np
+def _stats_list(values: list[float], scale: float = 1.0) -> dict:
+    arr = np.array(values) * scale
+    return {
+        "mean": float(np.mean(arr)),
+        "median": float(np.median(arr)),
+        "std": float(np.std(arr)),
+        "min": float(np.min(arr)),
+        "max": float(np.max(arr)),
+        "p95": float(np.percentile(arr, 95)),
+        "p99": float(np.percentile(arr, 99)),
+        "count": len(values),
+    }

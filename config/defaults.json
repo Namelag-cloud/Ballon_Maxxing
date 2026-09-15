@@ -52,5 +52,71 @@
     "show_colors": true,
     "show_outline": true,
     "show_track_ids": true
+  },
+  "behavior": {
+    "enabled": false,
+    "seed": 12345,
+    "reaction_time": {
+      "distribution": "lognormal",
+      "median_ms": 300,
+      "sigma": 0.45,
+      "minimum_ms": 150,
+      "maximum_ms": 2500
+    },
+    "movement": {
+      "model": "fitts",
+      "a_ms": 80,
+      "b_ms": 70,
+      "variance": 0.15
+    },
+    "trajectory": {
+      "enabled": true,
+      "lateral_deviation_px": 2.0,
+      "velocity_variance": 0.15,
+      "endpoint_correction": true,
+      "points": 20
+    },
+    "jitter": {
+      "enabled": true,
+      "amplitude_px": 1.5,
+      "smoothness": 0.8
+    },
+    "click": {
+      "duration_distribution": "lognormal",
+      "median_ms": 80,
+      "sigma": 0.25,
+      "minimum_ms": 25,
+      "maximum_ms": 250
+    },
+    "errors": {
+      "enabled": false,
+      "miss_probability": 0.005,
+      "delayed_response_probability": 0.02,
+      "extra_pause_probability": 0.01,
+      "extra_pause_min_ms": 200,
+      "extra_pause_max_ms": 800
+    },
+    "warmup": {
+      "enabled": true,
+      "duration_s": 30,
+      "modifier": 0.15
+    },
+    "fatigue": {
+      "enabled": true,
+      "start_s": 300,
+      "rate": 0.05,
+      "maximum": 0.30
+    },
+    "micro_pauses": {
+      "enabled": true,
+      "probability": 0.01,
+      "minimum_ms": 300,
+      "maximum_ms": 1500
+    },
+    "endpoint_error": {
+      "enabled": true,
+      "scale_px": 5.0,
+      "max_px": 12.0
+    }
   }
 }

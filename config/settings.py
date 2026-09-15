@@ -6,6 +6,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from behavior.config import BehaviorConfig
+
 
 class RunMode(Enum):
     BENCHMARK = "benchmark"
@@ -101,6 +103,7 @@ class Settings:
     rules: RulesConfig = field(default_factory=RulesConfig)
     input: InputConfig = field(default_factory=InputConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
+    behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> Settings:
@@ -142,6 +145,9 @@ class Settings:
         debug_data = data.get("debug", {})
         debug = DebugConfig(**debug_data)
 
+        behavior_data = data.get("behavior", {})
+        behavior = BehaviorConfig.from_dict(behavior_data) if behavior_data else BehaviorConfig()
+
         return cls(
             mode=mode,
             capture=capture,
@@ -153,6 +159,7 @@ class Settings:
             rules=rules,
             input=inp,
             debug=debug,
+            behavior=behavior,
         )
 
 

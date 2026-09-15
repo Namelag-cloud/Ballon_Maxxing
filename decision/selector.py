@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 from config.settings import Settings
 from tracking.tracker import BalloonTrack
@@ -17,6 +18,7 @@ class ClickAction:
     confidence: float
     reason: str
     timestamp: float
+    metadata: Optional[dict] = field(default=None)
 
 
 class TargetSelector:

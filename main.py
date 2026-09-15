@@ -8,6 +8,11 @@ import time
 import threading
 from typing import Optional
 
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except Exception:
+    pass
+
 import numpy as np
 import mss
 
@@ -17,11 +22,14 @@ from vision.pipeline import VisionPipeline
 from tracking.tracker import Tracker, BalloonTrack
 from decision.selector import TargetSelector, ClickAction
 from input.sendinput import SendInputBackend
+from input.coordinates import frame_to_screen
 from telemetry.logger import TelemetryLogger, FrameTelemetry
 from telemetry.timing import now_monotonic
 from debug.visualizer import DebugVisualizer
 from game_profiles.base import GameProfile, GameAction
 from game_profiles import get_profile
+from behavior.model import BehavioralModel
+from behavior.action_scheduler import ActionScheduler
 
 
 def _game_action_to_click_action(a: GameAction) -> ClickAction:
@@ -32,6 +40,7 @@ def _game_action_to_click_action(a: GameAction) -> ClickAction:
         confidence=a.metadata.get("confidence", 1.0) if a.metadata else 1.0,
         reason=a.reason,
         timestamp=a.timestamp,
+        metadata=a.metadata,
     )
 
 
@@ -55,12 +64,14 @@ class Application:
         settings: Settings,
         game_profile: Optional[GameProfile] = None,
         duration: Optional[float] = None,
+        startup_delay: float = 3.0,
     ) -> None:
         self._settings = settings
         self._running = True
         self._input_enabled = settings.input.enabled
         self._mode = settings.mode
         self._duration = duration
+        self._startup_delay = startup_delay
         self._start_time = now_monotonic()
         self._game_profile = game_profile
 
@@ -71,6 +82,12 @@ class Application:
         self._input_backend = SendInputBackend() if settings.input.enabled else None
         self._telemetry = TelemetryLogger()
         self._visualizer = DebugVisualizer(settings)
+
+        self._behavior = None
+        self._action_scheduler = None
+        if settings.behavior.enabled:
+            self._behavior = BehavioralModel(settings.behavior)
+            self._action_scheduler = ActionScheduler()
 
         self._frame_count = 0
         self._total_clicks = 0
@@ -92,7 +109,7 @@ class Application:
                 elif vk == HK_ESC:
                     print("[HOTKEY] ESC pressed, shutting down...")
                     self._running = False
-            return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
+            return user32.CallNextHookEx(None, nCode, wParam, ctypes.c_void_p(lParam))
 
         hook_proc = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)(callback)
         user32 = ctypes.windll.user32
@@ -180,13 +197,16 @@ class Application:
                         frame, detections, tracks, actions,
                         input_enabled=False, fps=self._current_fps,
                     )
-                    key = self._visualizer.show(vis)
-                    if key == 27:
-                        self._running = False
-                        break
+                key = self._visualizer.show(vis)
+                if key == 27:
+                    if self._action_scheduler and not self._action_scheduler.is_idle:
+                        self._action_scheduler.cancel()
+                    self._running = False
+                    break
 
         except KeyboardInterrupt:
-            pass
+            if self._action_scheduler and not self._action_scheduler.is_idle:
+                self._action_scheduler.cancel()
 
         self._print_benchmark_results(durations, frame_times)
 
@@ -272,8 +292,29 @@ class Application:
         print("Running LIVE mode - detecting AND clicking targets")
         if self._game_profile:
             print(f"Game profile: {self._game_profile.name}")
+        if self._behavior:
+            print(f"Behavioral model: enabled (seed={self._behavior.config.seed})")
         print("F8 = Toggle click on/off | ESC = Emergency stop")
-        print("Input is ACTIVE. Move mouse to safe area if needed.\n")
+
+        if self._startup_delay > 0:
+            print(f"\nStarting in {self._startup_delay:.1f}s — switch to your game window now...")
+            delay_end = now_monotonic() + self._startup_delay
+            last_printed = -1
+            while self._running and now_monotonic() < delay_end:
+                remaining = delay_end - now_monotonic()
+                secs = int(remaining) + 1
+                if secs != last_printed and secs > 0:
+                    print(f"  {secs}s remaining...")
+                    last_printed = secs
+                time.sleep(0.05)
+            if not self._running:
+                return
+            print("GO — input is now ACTIVE\n")
+        else:
+            print("Input is ACTIVE. Move mouse to safe area if needed.\n")
+
+        if self._behavior and not self._behavior._session_started:
+            self._behavior.start_session()
 
         try:
             while self._running:
@@ -292,11 +333,52 @@ class Application:
 
                 clicks_this_frame = 0
                 input_ts = None
+                action_ts = None
+                region = self._settings.capture.region
 
-                if self._input_enabled and actions:
+                if self._behavior and self._action_scheduler:
+                    completed = self._action_scheduler.tick(self._input_backend)
+                    if completed is not None:
+                        self._total_clicks += 1
+                        clicks_this_frame += 1
+                        input_ts = completed.click_up
+                        action_ts = completed
+                        self._input_backend._last_x = self._action_scheduler.active_action.target_x if self._action_scheduler.active_action else self._input_backend._last_x
+                        self._input_backend._last_y = self._action_scheduler.active_action.target_y if self._action_scheduler.active_action else self._input_backend._last_y
+                        self._action_scheduler.clear()
+
+                    if self._action_scheduler.is_idle and self._input_enabled and actions:
+                        action = actions[0]
+                        px, py = action.position
+                        screen_x, screen_y = frame_to_screen(px, py, region.left, region.top)
+
+                        behavioral_action = self._behavior.plan_action(
+                            current_x=self._input_backend._last_x,
+                            current_y=self._input_backend._last_y,
+                            target_x=float(screen_x),
+                            target_y=float(screen_y),
+                            target_width=float(action.metadata.get("area", 5000) ** 0.5) if action.metadata else 5000.0,
+                            target_metadata=action.metadata,
+                        )
+
+                        if behavioral_action.is_miss:
+                            miss_offset_x = self._behavior.rng.normal(0, 50)
+                            miss_offset_y = self._behavior.rng.normal(0, 50)
+                            screen_x = int(screen_x + miss_offset_x)
+                            screen_y = int(screen_y + miss_offset_y)
+
+                        self._action_scheduler.start_action(
+                            behavioral_action, screen_x, screen_y
+                        )
+
+                        if self._game_profile and game_actions:
+                            self._game_profile.on_click_sent(game_actions[0])
+
+                elif self._input_enabled and actions:
                     for i, action in enumerate(actions):
                         px, py = action.position
-                        ts = self._input_backend.click(px, py)
+                        screen_x, screen_y = frame_to_screen(px, py, region.left, region.top)
+                        ts = self._input_backend.click_screen(screen_x, screen_y)
                         clicks_this_frame += 1
                         self._total_clicks += 1
 
@@ -327,6 +409,7 @@ class Application:
                     tracks_count=len(tracks),
                     clicks_sent=clicks_this_frame,
                     behavioral=self._telemetry.behavioral.extract(len(tracks)),
+                    action_timestamps=action_ts,
                 )
                 self._telemetry.log_frame(telem)
 
@@ -405,7 +488,7 @@ class Application:
         print(f"\nSession complete. {self._frame_count} frames processed, {self._total_clicks} clicks sent.")
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Balloon Game Automation")
     parser.add_argument(
         "--mode",
@@ -448,7 +531,17 @@ def main():
         default=None,
         help="Run for N seconds then stop (useful for benchmarking)",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--startup-delay",
+        type=float,
+        default=3.0,
+        help="Seconds to wait before sending input in LIVE mode (default: 3.0, 0 to disable)",
+    )
+    return parser.parse_args(argv)
+
+
+def main():
+    args = parse_args()
 
     settings = load_settings(args.config)
 
@@ -490,9 +583,11 @@ def main():
     print(f"Region: {settings.capture.region.left},{settings.capture.region.top} "
           f"{settings.capture.region.width}x{settings.capture.region.height}")
     print(f"Input enabled: {settings.input.enabled}")
+    if settings.mode == RunMode.LIVE and args.startup_delay > 0:
+        print(f"Startup delay: {args.startup_delay}s")
     print()
 
-    app = Application(settings, game_profile=game_profile, duration=args.duration)
+    app = Application(settings, game_profile=game_profile, duration=args.duration, startup_delay=args.startup_delay)
     app.run()
 
 

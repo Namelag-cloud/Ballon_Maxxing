@@ -1,0 +1,29 @@
+{
+  "total_frames": 1699,
+  "total_clicks": 0,
+  "fps": 57.524580762415,
+  "processing_ms": {
+    "mean": 55.710345791265524,
+    "median": 53.191099956166,
+    "p95": 66.99307996896096,
+    "p99": 70.97201401251368,
+    "min": 42.22120001213625,
+    "max": 81.61580003798008
+  },
+  "e2e_latency_ms": {
+    "mean": 29.262480459679214,
+    "median": 28.973100008442998,
+    "p95": 33.49085000809281,
+    "p99": 36.83465196751058
+  },
+  "avg_detections_per_frame": 1.0,
+  "behavioral": {
+    "reaction_time": null,
+    "reaction_time_variance": 0.0,
+    "click_offset_from_center": 0.0,
+    "click_interval": 0.0,
+    "pair_click_delta": null,
+    "targets_visible": 1699,
+    "session_duration": 129.54896480002208
+  }
+}
