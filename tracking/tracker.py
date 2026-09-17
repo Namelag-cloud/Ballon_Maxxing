@@ -105,6 +105,8 @@ class Tracker:
             confidence=det.color_confidence,
             first_seen=now,
             last_seen=now,
+            tracking_class=det.tracking_class,
+            metadata=dict(det.metadata),
         )
 
     def _update_track(self, track_id: int, det: Detection, now: float) -> None:
