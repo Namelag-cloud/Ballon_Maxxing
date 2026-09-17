@@ -12,7 +12,7 @@ from game_profiles.balloon_types import TargetType
 COLORS = {
     "blue": (210, 105, 25),
     "red": (55, 70, 245),
-    "yellow": (130, 200, 245),
+    "yellow": (100, 200, 245),
     "green": (90, 190, 70),
 }
 
