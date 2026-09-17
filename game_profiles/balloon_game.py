@@ -15,6 +15,7 @@ from game_profiles.balloon_types import (
 )
 from game_profiles.base import GameAction, GameProfile, GameType
 from vision.color_classifier import ColorClassifier
+from vision.g_symbol_detector import GSymbolDetector
 from vision.outline_detector import OutlineDetector
 from vision.ring_detector import RingDetector
 
@@ -42,6 +43,7 @@ class BalloonGameProfile(GameProfile):
         self._classifier = ColorClassifier(self._settings)
         self._outline = OutlineDetector(self._settings)
         self._ring = RingDetector()
+        self._g_detector = GSymbolDetector(self._classifier)
         self._kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE,
             (
@@ -69,6 +71,7 @@ class BalloonGameProfile(GameProfile):
             )
 
         candidates.extend(self._detect_multicolor_special(hsv))
+        candidates.extend(self._g_detector.detect(hsv))
 
         # Use the upper portion of the observed balloon-size distribution as
         # the frame-local reference for special-vs-twin classification. The
