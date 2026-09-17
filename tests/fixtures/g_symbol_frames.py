@@ -15,23 +15,27 @@ BGR_COLORS = {
 def g_symbol_frame(*, include_yellow: bool = True, counter_overlay: bool = False, left_clipped: bool = False) -> np.ndarray:
     """Synthetic G fixture calibrated to the observed video geometry."""
     frame = np.full((1600, 1600, 3), 245, dtype=np.uint8)
-    center = (350, 470)
-    axes = (145, 120)
-    thickness = 60
+    # The recording shows a tall, left-edge G: the red and green arcs form
+    # the left spine, while the blue region forms the right-side bar.
+    # Keep the unshifted fixture fully visible; the clipping test applies the
+    # same 180 px translation used by the original fixture.
+    center = (330, 470)
+    axes = (150, 145)
+    thickness = 50
 
     cv2.ellipse(frame, center, axes, 0, 205, 330, BGR_COLORS["red"], thickness)
     if include_yellow:
         cv2.ellipse(frame, center, axes, 0, 165, 220, BGR_COLORS["yellow"], thickness)
     cv2.ellipse(frame, center, axes, 0, 30, 155, BGR_COLORS["green"], thickness)
     cv2.ellipse(frame, center, axes, 0, 300, 360, BGR_COLORS["blue"], thickness)
-    cv2.rectangle(frame, (350, 440), (505, 500), BGR_COLORS["blue"], -1)
+    cv2.rectangle(frame, (330, 440), (485, 500), BGR_COLORS["blue"], -1)
 
     # The counter is deliberately drawn over the blue click surface. The
     # detector must not read or otherwise depend on its text/count.
     if counter_overlay:
         cv2.ellipse(
             frame,
-            (430, 455),
+            (410, 455),
             (45, 28),
             0,
             0,
