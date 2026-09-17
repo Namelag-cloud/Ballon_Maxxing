@@ -22,7 +22,7 @@
     "enabled": true,
     "min_white_ratio": 0.15,
     "min_contrast": 30,
-    "border_sample_width": 3
+    "border_sample_width": 10
   },
   "tracking": {
     "max_distance": 50,
