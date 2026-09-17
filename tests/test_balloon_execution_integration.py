@@ -219,12 +219,16 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         self.assertIsNotNone(g2)
         result = self.executor.tick([], g2, self.input, 0, 0, True)
 
-        self.assertTrue(result.g_click_completed)
+        self.assertFalse(result.g_click_completed)
         self.assertEqual(self.executor.latest_g.position, (80, 90))
 
         g_active = self.executor.g_scheduler.active_action
         self.assertIsNotNone(g_active)
         self.assertEqual((g_active.target_x, g_active.target_y), (80, 90))
+
+        self.executor.tick([], g2, self.input, 0, 0, True)
+        result = self.executor.tick([], g2, self.input, 0, 0, True)
+        self.assertTrue(result.g_click_completed)
 
         disappeared = self.executor.tick([], None, self.input, 0, 0, True)
         self.assertFalse(disappeared.g_click_completed)
