@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import cv2
@@ -18,6 +18,8 @@ class Detection:
     color_name: str
     color_confidence: float
     outline: OutlineResult
+    tracking_class: str | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 class ObjectDetector:
