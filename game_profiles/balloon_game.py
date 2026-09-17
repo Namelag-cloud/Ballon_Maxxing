@@ -77,6 +77,7 @@ class BalloonGameProfile(GameProfile):
             max(d.width, d.height)
             for d in candidates
             if d.target_type == TargetType.NORMAL_BALLOON
+            and d.color is not None
         ]
         median_diameter = float(np.median(balloon_diameters)) if balloon_diameters else 0.0
 
@@ -207,23 +208,36 @@ class BalloonGameProfile(GameProfile):
             if w <= 0 or h <= 0:
                 continue
 
-            fill_ratio = float(area) / float(w * h)
-            if fill_ratio < self._CORE_FILL_MIN:
-                # Thin rings and the multicolor star are deliberately excluded
-                # from the balloon-core candidates here.
-                continue
-
             component_mask = np.zeros(mask.shape, dtype=np.uint8)
             component_mask[labels == label] = 255
-            color_name_detected, confidence = self._classifier.classify_mask(
-                hsv, component_mask
+            contour_list, _ = cv2.findContours(
+                component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
             )
-            if color_name_detected != color_name or confidence < self._settings.detection.min_confidence:
+            if not contour_list:
                 continue
+            contour = max(contour_list, key=cv2.contourArea)
+            perimeter = cv2.arcLength(contour, True)
+            contour_area = cv2.contourArea(contour)
+            circularity = (
+                4.0 * np.pi * contour_area / (perimeter * perimeter)
+                if perimeter > 0
+                else 0.0
+            )
+            hull_area = cv2.contourArea(cv2.convexHull(contour))
+            solidity = contour_area / hull_area if hull_area > 0 else 0.0
 
             white_core_ratio = self._white_core_ratio(hsv, (x, y, w, h))
-            if white_core_ratio >= self._WHITE_CORE_RATIO:
-                visual = self._visual_features(hsv, component_mask, (x, y, w, h))
+            if (
+                white_core_ratio >= self._WHITE_CORE_RATIO
+                and circularity >= 0.08
+                and solidity >= 0.20
+            ):
+                visual = VisualFeatures(
+                    circularity=float(circularity),
+                    solidity=float(solidity),
+                    white_border_ratio=0.0,
+                    outline_contrast=0.0,
+                )
                 detections.append(
                     TargetDetection(
                         target_type=TargetType.INVALID_WHITE,
@@ -231,12 +245,24 @@ class BalloonGameProfile(GameProfile):
                         center=(x + w // 2, y + h // 2),
                         bbox=(x, y, w, h),
                         area=area,
-                        confidence=confidence,
+                        confidence=1.0,
                         width=float(w),
                         height=float(h),
                         visual_features=visual,
                     )
                 )
+                continue
+
+            fill_ratio = float(area) / float(w * h)
+            if fill_ratio < self._CORE_FILL_MIN:
+                # Thin colored rings and the multicolor star are not balloon
+                # cores and are handled by their own visual classification.
+                continue
+
+            color_name_detected, confidence = self._classifier.classify_mask(
+                hsv, component_mask
+            )
+            if color_name_detected != color_name or confidence < self._settings.detection.min_confidence:
                 continue
 
             visual = self._visual_features(hsv, component_mask, (x, y, w, h))
@@ -331,7 +357,6 @@ class BalloonGameProfile(GameProfile):
         component_mask: np.ndarray,
         bbox: tuple[int, int, int, int],
     ) -> VisualFeatures:
-        x, y, w, h = bbox
         contour_list, _ = cv2.findContours(
             component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
