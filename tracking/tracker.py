@@ -22,6 +22,8 @@ class BalloonTrack:
     last_seen: float
     clicked: bool = False
     frames_missing: int = 0
+    tracking_class: str | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 class Tracker:
@@ -52,6 +54,9 @@ class Tracker:
             for i, track_id in enumerate(track_ids):
                 track = self._tracks[track_id]
                 for j, det in enumerate(detections):
+                    if track.tracking_class is not None and det.tracking_class is not None and track.tracking_class != det.tracking_class:
+                        dist_matrix[i, j] = 1e9
+                        continue
                     dx = track.position[0] - det.center[0]
                     dy = track.position[1] - det.center[1]
                     dist = (dx * dx + dy * dy) ** 0.5
@@ -111,3 +116,5 @@ class Tracker:
         track.confidence = det.color_confidence
         track.last_seen = now
         track.frames_missing = 0
+        track.tracking_class = det.tracking_class
+        track.metadata = dict(det.metadata)
