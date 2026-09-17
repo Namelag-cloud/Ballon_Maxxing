@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional, Protocol
 
-from behavior.model import BehavioralModel, BehavioralAction
+from behavior.model import BehavioralAction, BehavioralModel
 from telemetry.timing import now_monotonic
 
 
@@ -125,14 +125,11 @@ class ActionScheduler:
         if action.phase == ActionPhase.MOVING:
             if not action.trajectory:
                 action.timestamps.movement_end = now
-                action.timestamps.click_down = input_backend.move_to(
-                    action.target_x, action.target_y
-                )
+                input_backend.move_to(action.target_x, action.target_y)
                 action.phase = ActionPhase.CLICK_DOWN
                 return None
-            else:
-                self._tick_trajectory(action, input_backend, now)
-                return None
+            self._tick_trajectory(action, input_backend, now)
+            return None
 
         if action.phase == ActionPhase.CLICK_DOWN:
             input_backend.left_down()
@@ -154,18 +151,30 @@ class ActionScheduler:
     def _tick_trajectory(
         self, action: ActiveAction, input_backend: InputBackend, now: float
     ) -> None:
-        if action.trajectory_index >= len(action.trajectory):
-            action.timestamps.movement_end = now
-            input_backend.move_to(action.target_x, action.target_y)
-            action.phase = ActionPhase.CLICK_DOWN
-            return
+        """Advance to the current wall-clock trajectory position.
 
-        pt = action.trajectory[action.trajectory_index]
-        target_t = action.timestamps.movement_start + pt.t
-
-        if now >= target_t:
+        The old implementation consumed at most one overdue point per tick.
+        With a 20-point trajectory and a 20-33 Hz polling loop that made the
+        scheduler cadence accumulate into the movement duration. We instead
+        consume every point whose planned timestamp has already elapsed.
+        """
+        trajectory = action.trajectory
+        while action.trajectory_index < len(trajectory):
+            pt = trajectory[action.trajectory_index]
+            target_t = action.timestamps.movement_start + pt.t
+            if now < target_t:
+                break
             input_backend.move_to(int(pt.x), int(pt.y))
             action.trajectory_index += 1
+
+        if action.trajectory_index >= len(trajectory):
+            # The final generated trajectory point intentionally stops short of
+            # the exact target when endpoint correction is enabled, so preserve
+            # the existing final move_to(target) behavior but perform it in the
+            # same tick instead of waiting for another scheduler poll.
+            input_backend.move_to(action.target_x, action.target_y)
+            action.timestamps.movement_end = now
+            action.phase = ActionPhase.CLICK_DOWN
 
     def cancel(self) -> Optional[ActionTimestamps]:
         if self._active is None:
