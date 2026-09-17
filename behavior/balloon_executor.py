@@ -120,6 +120,15 @@ class BalloonExecutor:
                     self._g_scheduler.active_action.target_y,
                 )
 
+        if g_completion is not None and self._g_visible and input_enabled:
+            self._start_single(
+                self._g_scheduler,
+                self._latest_g,
+                input_backend,
+                region_left,
+                region_top,
+            )
+
         if not self._g_visible and not self._g_scheduler.is_idle:
             # Let an in-flight click finish safely. No new G action will be
             # scheduled after disappearance.
