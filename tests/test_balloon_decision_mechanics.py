@@ -112,6 +112,35 @@ class TestBalloonDecisionMechanics(unittest.TestCase):
         self.assertEqual(self.engine.state.special_step, SpecialSequenceStep.COMPLETE)
         self.assertTrue(self.engine.state.special_sequence_seen)
 
+    def test_completed_special_sequence_cannot_be_retriggered(self):
+        for color, target_id in [
+            (BalloonColor.BLUE, 90),
+            (BalloonColor.RED, 91),
+            (BalloonColor.YELLOW, 92),
+            (BalloonColor.GREEN, 93),
+        ]:
+            action = self.engine.decide([
+                detection(
+                    TargetType.SPECIAL_SEQUENCE_BALLOON,
+                    color,
+                    (target_id, 100),
+                    target_id=target_id,
+                ),
+            ]).actions[0]
+            self.assertTrue(self.engine.complete_action(action))
+
+        self.assertEqual(self.engine.state.mode, GameMode.NORMAL_PLAY)
+        result = self.engine.decide([
+            detection(
+                TargetType.SPECIAL_SEQUENCE_BALLOON,
+                BalloonColor.BLUE,
+                (100, 200),
+                target_id=94,
+            ),
+        ])
+        self.assertEqual(result.mode, GameMode.NORMAL_PLAY)
+        self.assertEqual(result.actions, ())
+
     def test_twin_pair_is_one_coordinated_action_with_30ms_bound(self):
         result = self.engine.decide([
             detection(TargetType.TWIN_BALLOON, BalloonColor.YELLOW, (100, 100), target_id=20),
