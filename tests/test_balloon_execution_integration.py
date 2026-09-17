@@ -229,14 +229,14 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         self.assertFalse(result.g_click_completed)
         self.assertEqual(self.executor.latest_g.position, (80, 90))
 
-        g_active = self.executor.g_scheduler.active_action
-        self.assertIsNotNone(g_active)
-        self.assertEqual((g_active.target_x, g_active.target_y), (80, 90))
-
         self.executor.tick([], g2, self.input, 0, 0, True)
         result = self.executor.tick([], g2, self.input, 0, 0, True)
         self.assertTrue(result.g_click_completed)
+        self.assertEqual(self.input.moves[-1][1:], (80, 90))
 
+        # A still-pending G action is cancelled when vision reports that G
+        # has disappeared; no counter is involved in this lifetime decision.
+        self.executor.tick([], g2, self.input, 0, 0, True)
         disappeared = self.executor.tick([], None, self.input, 0, 0, True)
         self.assertFalse(disappeared.g_click_completed)
 
