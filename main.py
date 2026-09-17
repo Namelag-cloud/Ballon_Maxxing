@@ -26,10 +26,63 @@ from input.coordinates import frame_to_screen
 from telemetry.logger import TelemetryLogger, FrameTelemetry
 from telemetry.timing import now_monotonic
 from debug.visualizer import DebugVisualizer
-from game_profiles.base import GameProfile, GameAction
+from game_profiles.base import GameProfile, GameAction, GameType
 from game_profiles import get_profile
+from game_profiles.balloon_types import BalloonAction, TwinAction
+from decision.mechanics import BalloonDecisionEngine
 from behavior.model import BehavioralModel
 from behavior.action_scheduler import ActionScheduler
+from behavior.balloon_executor import BalloonExecutor
+
+
+def _balloon_action_to_click_actions(action: BalloonAction | TwinAction) -> list[ClickAction]:
+    targets = action.targets if isinstance(action, TwinAction) else (action,)
+    result: list[ClickAction] = []
+    for target in targets:
+        metadata = dict(target.metadata)
+        metadata.update({
+            "color": target.color.value if target.color else "unknown",
+            "target_type": target.target_type.value,
+            "is_twin": target.is_twin,
+            "is_special_sequence": target.is_special_sequence,
+            "is_g": target.is_g,
+            "target_width": target.target_width,
+        })
+        result.append(
+            ClickAction(
+                track_id=target.target_id if target.target_id is not None else -1,
+                position=target.position,
+                color=metadata["color"],
+                confidence=float(metadata.get("confidence", 1.0)),
+                reason=target.target_type.value,
+                timestamp=now_monotonic(),
+                metadata=metadata,
+            )
+        )
+    return result
+
+
+def _balloon_action_to_game_actions(action: BalloonAction | TwinAction) -> list[GameAction]:
+    targets = action.targets if isinstance(action, TwinAction) else (action,)
+    result: list[GameAction] = []
+    for target in targets:
+        metadata = dict(target.metadata)
+        metadata.update({
+            "color": target.color.value if target.color else "unknown",
+            "target_type": target.target_type.value,
+            "is_twin": target.is_twin,
+            "is_special_sequence": target.is_special_sequence,
+            "is_g": target.is_g,
+        })
+        result.append(
+            GameAction(
+                position=target.position,
+                reason=target.target_type.value,
+                timestamp=now_monotonic(),
+                metadata=metadata,
+            )
+        )
+    return result
 
 
 def _game_action_to_click_action(a: GameAction) -> ClickAction:
@@ -85,9 +138,16 @@ class Application:
 
         self._behavior = None
         self._action_scheduler = None
+        self._balloon_decision = None
+        self._balloon_executor = None
+        self._balloon_frame_decision = None
         if settings.behavior.enabled:
             self._behavior = BehavioralModel(settings.behavior)
             self._action_scheduler = ActionScheduler()
+            if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
+                self._balloon_executor = BalloonExecutor(self._behavior)
+        if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
+            self._balloon_decision = BalloonDecisionEngine(settings)
 
         self._frame_count = 0
         self._total_clicks = 0
@@ -131,6 +191,34 @@ class Application:
     def _process_frame(self, frame: np.ndarray):
         if self._game_profile is not None:
             detections = self._game_profile.detect(frame)
+            if self._balloon_decision is not None:
+                tracking_detections = self._game_profile.to_tracking_detections(detections)
+                tracks = self._tracker.update(tracking_detections)
+                current_detections = []
+                for track in tracks.values():
+                    if track.frames_missing != 0:
+                        continue
+                    observed = dict(track.metadata)
+                    observed.update({
+                        "target_id": track.id,
+                        "center": track.position,
+                        "bbox": track.bbox,
+                        "color_name": track.color if track.color != "unknown" else observed.get("color_name"),
+                        "color_confidence": track.confidence,
+                        "confidence": track.confidence,
+                    })
+                    current_detections.append(observed)
+
+                decision = self._balloon_decision.decide(current_detections)
+                self._balloon_frame_decision = decision
+
+                click_actions: list[ClickAction] = []
+                game_actions: list[GameAction] = []
+                for action in decision.actions:
+                    click_actions.extend(_balloon_action_to_click_actions(action))
+                    game_actions.extend(_balloon_action_to_game_actions(action))
+                return detections, tracks, click_actions, game_actions
+
             game_actions = self._game_profile.select_targets(detections, frame.shape)
             click_actions = [_game_action_to_click_action(a) for a in game_actions]
             tracks_dict = {}
@@ -342,7 +430,31 @@ class Application:
                 action_ts = None
                 region = self._settings.capture.region
 
-                if self._behavior and self._action_scheduler:
+                if self._balloon_executor and self._balloon_frame_decision is not None:
+                    self._balloon_executor.set_mouse_position(
+                        (self._input_backend._last_x, self._input_backend._last_y)
+                    )
+                    execution = self._balloon_executor.tick(
+                        self._balloon_frame_decision.actions,
+                        self._balloon_frame_decision.g_action,
+                        self._input_backend,
+                        region.left,
+                        region.top,
+                        self._input_enabled,
+                    )
+                    clicks_this_frame = execution.clicks_sent
+                    if execution.input_timestamp is not None:
+                        input_ts = execution.input_timestamp
+                    action_ts = execution.action_timestamps
+
+                    if execution.completed_primary_action is not None:
+                        self._balloon_decision.complete_action(
+                            execution.completed_primary_action
+                        )
+
+                    self._total_clicks += execution.clicks_sent
+
+                elif self._behavior and self._action_scheduler:
                     completed = self._action_scheduler.tick(self._input_backend)
                     if completed is not None:
                         self._total_clicks += 1
