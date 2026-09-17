@@ -42,7 +42,7 @@ class GSymbolDetector:
     _MIN_COMPONENT_AREA = 500
     _MORPH_KERNEL = 7
     _MIN_G_HEIGHT_RATIO = 0.07
-    _MAX_G_HEIGHT_RATIO = 0.20
+    _MAX_G_HEIGHT_RATIO = 0.25
     _MIN_ASPECT = 0.50
     _MAX_ASPECT = 1.10
     _MIN_SCORE = 0.66
