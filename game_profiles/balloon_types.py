@@ -97,6 +97,15 @@ class TargetDetection:
 
 
 @dataclass(frozen=True)
+class TwinAction:
+    """One logical action coordinating the two twin balloon clicks."""
+
+    targets: tuple["BalloonAction", "BalloonAction"]
+    max_click_delta_ms: float = 30.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class BalloonAction:
     """Decision-layer action contract; execution details belong to behavior."""
 
