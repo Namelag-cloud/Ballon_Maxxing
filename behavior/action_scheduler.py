@@ -283,7 +283,7 @@ class TwinActionScheduler:
         second.timestamps.action_complete = self._clock()
         first.phase = ActionPhase.COMPLETE
         second.phase = ActionPhase.COMPLETE
-        return TwinActionCompletion(first, second, delta_ms)
+        return TwinActionCompletion(first.timestamps, second.timestamps, delta_ms)
 
     def clear(self) -> None:
         self._active = None
