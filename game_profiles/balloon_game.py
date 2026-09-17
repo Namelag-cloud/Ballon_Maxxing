@@ -33,9 +33,9 @@ class BalloonGameProfile(GameProfile):
 
     _CORE_FILL_MIN = 0.55
     _WHITE_CORE_RATIO = 0.50
+    _WHITE_MIN_DIAMETER_RATIO = 0.05
     _TWIN_WHITE_BORDER_RATIO = 0.10
     _SPECIAL_RELATIVE_DIAMETER = 0.82
-    _SPECIAL_FRAME_DIAMETER = 0.055
 
     def __init__(self) -> None:
         self._settings = load_settings()
@@ -65,24 +65,29 @@ class BalloonGameProfile(GameProfile):
 
         for color_name in ("blue", "red", "yellow", "green"):
             candidates.extend(
-                self._detect_color_components(hsv, bgr_frame, color_name)
+                self._detect_color_components(hsv, color_name)
             )
 
         candidates.extend(self._detect_multicolor_special(hsv))
 
-        # Classification of a ringed balloon uses the relative size of its core
-        # against the other balloon cores in the same frame. This avoids making
-        # the special/twin distinction depend on a fixed screen-space size.
+        # Use the upper portion of the observed balloon-size distribution as
+        # the frame-local reference for special-vs-twin classification. The
+        # reference video shows twins substantially smaller than the normal and
+        # special balloon cores, so this is more scale-robust than a fixed pixel
+        # threshold while resisting small balloons pulling the reference down.
         balloon_diameters = [
             max(d.width, d.height)
             for d in candidates
             if d.target_type == TargetType.NORMAL_BALLOON
             and d.color is not None
         ]
-        median_diameter = float(np.median(balloon_diameters)) if balloon_diameters else 0.0
+        reference_diameter = (
+            float(np.percentile(balloon_diameters, 75))
+            if balloon_diameters
+            else 0.0
+        )
 
         classified: list[TargetDetection] = []
-        frame_height = float(bgr_frame.shape[0])
         for detection in candidates:
             if detection.target_type == TargetType.NORMAL_BALLOON and detection.color:
                 features = detection.visual_features
@@ -95,24 +100,23 @@ class BalloonGameProfile(GameProfile):
                 )
 
                 diameter = max(detection.width, detection.height)
-                relative_to_frame = diameter / frame_height if frame_height else 0.0
-                relative_to_median = (
-                    diameter / median_diameter if median_diameter > 0 else 0.0
+                relative_to_reference = (
+                    diameter / reference_diameter if reference_diameter > 0 else 0.0
                 )
 
                 is_large_ring_target = (
                     ring.detected
                     and ring.radius_ratio >= 1.25
-                    and relative_to_median >= self._SPECIAL_RELATIVE_DIAMETER
-                    and relative_to_frame >= self._SPECIAL_FRAME_DIAMETER
+                    and relative_to_reference >= self._SPECIAL_RELATIVE_DIAMETER
                 )
 
                 is_twin = (
                     ring.detected
                     and detection.color in (BalloonColor.YELLOW, BalloonColor.GREEN)
+                    and not is_large_ring_target
                     and (
                         features.white_border_ratio >= self._TWIN_WHITE_BORDER_RATIO
-                        or relative_to_median < self._SPECIAL_RELATIVE_DIAMETER
+                        or relative_to_reference < self._SPECIAL_RELATIVE_DIAMETER
                     )
                 )
 
@@ -137,7 +141,6 @@ class BalloonGameProfile(GameProfile):
 
             classified.append(detection)
 
-        # Deterministic order helps debugging and makes fixture tests stable.
         classified.sort(key=lambda d: (d.center[1], d.center[0], d.target_type.value))
         return [d.as_dict() for d in classified]
 
@@ -190,7 +193,6 @@ class BalloonGameProfile(GameProfile):
     def _detect_color_components(
         self,
         hsv: np.ndarray,
-        bgr_frame: np.ndarray,
         color_name: str,
     ) -> list[TargetDetection]:
         mask = self._classifier.make_color_mask(hsv, color_name)
@@ -200,6 +202,7 @@ class BalloonGameProfile(GameProfile):
         count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         detections: list[TargetDetection] = []
         color = BalloonColor(color_name)
+        frame_height = float(hsv.shape[0])
 
         for label in range(1, count):
             x, y, w, h, area = [int(v) for v in stats[label]]
@@ -227,17 +230,13 @@ class BalloonGameProfile(GameProfile):
             solidity = contour_area / hull_area if hull_area > 0 else 0.0
 
             white_core_ratio = self._white_core_ratio(hsv, (x, y, w, h))
+            diameter_ratio = max(w, h) / frame_height if frame_height else 0.0
             if (
                 white_core_ratio >= self._WHITE_CORE_RATIO
+                and diameter_ratio >= self._WHITE_MIN_DIAMETER_RATIO
                 and circularity >= 0.08
                 and solidity >= 0.20
             ):
-                visual = VisualFeatures(
-                    circularity=float(circularity),
-                    solidity=float(solidity),
-                    white_border_ratio=0.0,
-                    outline_contrast=0.0,
-                )
                 detections.append(
                     TargetDetection(
                         target_type=TargetType.INVALID_WHITE,
@@ -248,7 +247,10 @@ class BalloonGameProfile(GameProfile):
                         confidence=1.0,
                         width=float(w),
                         height=float(h),
-                        visual_features=visual,
+                        visual_features=VisualFeatures(
+                            circularity=float(circularity),
+                            solidity=float(solidity),
+                        ),
                     )
                 )
                 continue
