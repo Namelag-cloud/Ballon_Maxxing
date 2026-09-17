@@ -376,6 +376,10 @@ class Application:
             self._input_enabled = True
 
         self._input_backend = SendInputBackend()
+        if self._balloon_executor:
+            self._balloon_executor.set_mouse_position(
+                (self._input_backend._last_x, self._input_backend._last_y)
+            )
 
         print("Running LIVE mode - detecting AND clicking targets")
         if self._game_profile:
@@ -431,9 +435,6 @@ class Application:
                 region = self._settings.capture.region
 
                 if self._balloon_executor and self._balloon_frame_decision is not None:
-                    self._balloon_executor.set_mouse_position(
-                        (self._input_backend._last_x, self._input_backend._last_y)
-                    )
                     execution = self._balloon_executor.tick(
                         self._balloon_frame_decision.actions,
                         self._balloon_frame_decision.g_action,
