@@ -89,7 +89,7 @@ class TargetDetection:
             "height": self.height,
             "is_twin": self.is_twin,
             "is_special_sequence": self.is_special_sequence,
-            "has_outline": self.visual_features.white_border_ratio > 0.0,
+            "has_outline": self.visual_features.white_border_ratio >= 0.10,
             "outline_white_ratio": self.visual_features.white_border_ratio,
             "outline_contrast": self.visual_features.outline_contrast,
             "visual_features": self.visual_features.as_dict(),
