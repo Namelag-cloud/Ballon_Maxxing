@@ -229,7 +229,9 @@ class TwinActionScheduler:
 
     @property
     def is_idle(self) -> bool:
-        return self._active is None
+        return self._active is None or all(
+            action.phase == ActionPhase.COMPLETE for action in self._active
+        )
 
     @property
     def active_actions(self) -> tuple[ActiveAction, ActiveAction] | None:
