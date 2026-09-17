@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 
-from behavior.action_scheduler import TwinActionScheduler
 from behavior.balloon_executor import BalloonExecutor
 from behavior.model import BehavioralAction
 from config.settings import Settings
@@ -15,7 +14,6 @@ from game_profiles.balloon_types import (
 from tracking.tracker import Tracker
 from vision.detector import Detection
 from vision.outline_detector import OutlineResult
-from behavior.movement import TrajectoryPoint
 
 
 class FakeClock:
@@ -198,6 +196,15 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
             {target_id for pair in self.input.pairs for target_id in pair},
             {(100, 100), (120, 100)},
         )
+
+    def test_twin_scheduler_rejects_sync_violation(self):
+        self.input.pair_delta_s = 0.031
+        decision = self.engine.decide([
+            balloon_action(TargetType.TWIN_BALLOON, BalloonColor.GREEN, (100, 100), 22),
+            balloon_action(TargetType.TWIN_BALLOON, BalloonColor.GREEN, (120, 100), 23),
+        ])
+        with self.assertRaises(RuntimeError):
+            self._run_until_primary_complete(decision.actions)
 
     def test_g_repeats_while_visible_and_refreshes_position(self):
         normal = self.engine.decide([
