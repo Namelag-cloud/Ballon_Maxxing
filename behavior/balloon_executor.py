@@ -30,6 +30,7 @@ class BalloonExecutionResult:
     action_timestamps: Optional[ActionTimestamps] = None
     twin_completion: Optional[TwinActionCompletion] = None
     g_click_completed: bool = False
+    completed_primary_action: BalloonAction | None = None
 
 
 class BalloonExecutor:
@@ -68,6 +69,9 @@ class BalloonExecutor:
     def g_scheduler(self) -> ActionScheduler:
         return self._g_scheduler
 
+    def set_mouse_position(self, position: tuple[int, int]) -> None:
+        self._current_mouse = position
+
     @property
     def latest_g(self) -> BalloonAction | None:
         return self._latest_g
@@ -89,6 +93,7 @@ class BalloonExecutor:
         action_timestamps: Optional[ActionTimestamps] = None
         twin_completion: Optional[TwinActionCompletion] = None
         g_completed = False
+        completed_primary_action: BalloonAction | None = None
 
         # G is a concurrent lane. It is ticked independently of the primary
         # normal/special lane and only starts a new click while still visible.
@@ -147,6 +152,8 @@ class BalloonExecutor:
             clicks += 1
             action_timestamps = primary_completion
             input_timestamp = primary_completion.click_up
+            if isinstance(self._active_primary, BalloonAction):
+                completed_primary_action = self._active_primary
             self._active_primary = None
             self._primary_scheduler.clear()
 
@@ -156,6 +163,7 @@ class BalloonExecutor:
             action_timestamps=action_timestamps,
             twin_completion=twin_completion,
             g_click_completed=g_completed,
+            completed_primary_action=completed_primary_action,
         )
 
     def _start_single(
