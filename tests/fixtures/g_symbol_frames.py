@@ -12,9 +12,9 @@ BGR_COLORS = {
 }
 
 
-def g_symbol_frame(*, include_yellow: bool = True, counter_overlay: bool = False) -> np.ndarray:
+def g_symbol_frame(*, include_yellow: bool = True, counter_overlay: bool = False, left_clipped: bool = False) -> np.ndarray:
     """Synthetic G fixture calibrated to the observed video geometry."""
-    frame = np.full((1200, 1600, 3), 245, dtype=np.uint8)
+    frame = np.full((1600, 1600, 3), 245, dtype=np.uint8)
     center = (350, 470)
     axes = (145, 120)
     thickness = 60
@@ -38,6 +38,15 @@ def g_symbol_frame(*, include_yellow: bool = True, counter_overlay: bool = False
             360,
             BGR_COLORS["blue"],
             5,
+        )
+
+    if left_clipped:
+        transform = np.float32([[1, 0, -180], [0, 1, 0]])
+        frame = cv2.warpAffine(
+            frame,
+            transform,
+            (frame.shape[1], frame.shape[0]),
+            borderValue=(245, 245, 245),
         )
 
     return frame
