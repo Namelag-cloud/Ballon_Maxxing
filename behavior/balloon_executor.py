@@ -95,6 +95,18 @@ class BalloonExecutor:
         g_completed = False
         completed_primary_action: BalloonAction | None = None
 
+        # Refresh an in-flight G plan before its click phase when vision has
+        # moved the symbol. If G disappears before a click is dispatched, cancel
+        # the pending plan; an already-dispatched click is allowed to finish.
+        if self._g_scheduler.active_action is not None and not self._g_scheduler.is_idle:
+            g_active = self._g_scheduler.active_action
+            g_position = (
+                *self._to_screen(self._latest_g.position, region_left, region_top),
+            ) if self._latest_g is not None else None
+            if g_active.phase.name in {"WAITING_REACTION", "MOVING"}:
+                if g_position is None or (g_active.target_x, g_active.target_y) != g_position:
+                    self._g_scheduler.cancel()
+
         # G is a concurrent lane. It is ticked independently of the primary
         # normal/special lane and only starts a new click while still visible.
         g_completion = self._g_scheduler.tick(input_backend)
