@@ -51,6 +51,16 @@ class TestGSymbolDetector(unittest.TestCase):
         )
         self.assertEqual(with_counter[0].center, plain[0].center)
 
+    def test_detects_left_edge_clipped_g(self):
+        hsv = cv2.cvtColor(
+            g_symbol_frame(left_clipped=True),
+            cv2.COLOR_BGR2HSV,
+        )
+        detections = self.detector.detect(hsv)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].target_type, TargetType.G_SYMBOL)
+        self.assertEqual(detections[0].bbox[0], 0)
+
     def test_multicolor_star_is_not_g(self):
         detections = self.detector.detect(
             cv2.cvtColor(multicolor_star_frame(), cv2.COLOR_BGR2HSV)
