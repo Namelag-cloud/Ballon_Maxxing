@@ -102,6 +102,11 @@ class BalloonExecutor:
             clicks += 1
             g_completed = True
             input_timestamp = g_completion.click_up
+            if self._g_scheduler.active_action is not None:
+                self._current_mouse = (
+                    self._g_scheduler.active_action.target_x,
+                    self._g_scheduler.active_action.target_y,
+                )
 
         if not self._g_visible and not self._g_scheduler.is_idle:
             # Let an in-flight click finish safely. No new G action will be
@@ -141,6 +146,10 @@ class BalloonExecutor:
         if twin_completion is not None:
             clicks += 2
             action_timestamps = twin_completion.first
+            self._current_mouse = (
+                self._twin_scheduler.active_actions[1].target_x,
+                self._twin_scheduler.active_actions[1].target_y,
+            ) if self._twin_scheduler.active_actions is not None else self._current_mouse
             input_timestamp = max(
                 twin_completion.first.click_up,
                 twin_completion.second.click_up,
@@ -152,6 +161,11 @@ class BalloonExecutor:
             clicks += 1
             action_timestamps = primary_completion
             input_timestamp = primary_completion.click_up
+            if self._primary_scheduler.active_action is not None:
+                self._current_mouse = (
+                    self._primary_scheduler.active_action.target_x,
+                    self._primary_scheduler.active_action.target_y,
+                )
             if isinstance(self._active_primary, BalloonAction):
                 completed_primary_action = self._active_primary
             self._active_primary = None
@@ -225,7 +239,6 @@ class BalloonExecutor:
             target_x += int(self._behavior.rng.normal(0, 50))
             target_y += int(self._behavior.rng.normal(0, 50))
 
-        self._current_mouse = (target_x, target_y)
         return behavioral_action
 
     @staticmethod
