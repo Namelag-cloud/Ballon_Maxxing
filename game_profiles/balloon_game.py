@@ -34,6 +34,11 @@ class BalloonGameProfile(GameProfile):
     """
 
     _CORE_FILL_MIN = 0.55
+    # A balloon core should occupy most, but not essentially all, of its
+    # bounding box. This rejects solid UI bars/panels without using screen
+    # coordinates, while remaining tolerant of balloons clipped by a frame edge.
+    _CORE_FILL_MAX = 0.90
+    _CORE_MIN_CIRCULARITY = 0.45
     _WHITE_CORE_RATIO = 0.50
     _WHITE_MIN_DIAMETER_RATIO = 0.05
     _TWIN_WHITE_BORDER_RATIO = 0.10
@@ -284,9 +289,15 @@ class BalloonGameProfile(GameProfile):
                 continue
 
             fill_ratio = float(area) / float(w * h)
-            if fill_ratio < self._CORE_FILL_MIN:
-                # Thin colored rings and the multicolor star are not balloon
-                # cores and are handled by their own visual classification.
+            if not (
+                self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
+                and circularity >= self._CORE_MIN_CIRCULARITY
+            ):
+                # Thin colored rings, solid UI/background components, and the
+                # multicolor star are not balloon cores and are handled by
+                # their own visual classification. The shape test is
+                # coordinate-independent so legitimate edge-clipped balloons
+                # remain eligible.
                 continue
 
             color_name_detected, confidence = self._classifier.classify_mask(
