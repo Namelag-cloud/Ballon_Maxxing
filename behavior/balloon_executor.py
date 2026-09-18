@@ -81,13 +81,10 @@ class BalloonExecutor:
         # cancel only the pending plan; an already-dispatched click may finish.
         if self._g_scheduler.active_action is not None and not self._g_scheduler.is_idle:
             active = self._g_scheduler.active_action
-            g_position = self._to_screen(g_action.position, region_left, region_top) if g_action else None
-            if active.phase.name in {"WAITING_REACTION", "MOVING"}:
-                if g_position is None or (active.target_x, active.target_y) != (
-                    round(self._behavioral_endpoint(active.behavioral_action)[0]),
-                    round(self._behavioral_endpoint(active.behavioral_action)[1]),
-                ):
-                    self._g_scheduler.cancel()
+            # A disappearing G is observable; a moving/retargeted G is not
+            # authoritative enough to cancel solely from endpoint noise.
+            if active.phase.name in {"WAITING_REACTION", "MOVING"} and g_action is None:
+                self._g_scheduler.cancel()
 
         if self._g_visible and self._g_scheduler.is_idle and input_enabled:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
