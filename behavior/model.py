@@ -85,6 +85,7 @@ class BehavioralModel:
             "fatigue_max_ticks_per_min": config.human_profile.fatigue_max_ticks_per_min,
             "fat_finger_probability": config.human_profile.fat_finger_probability,
             "fat_finger_multiplier": config.human_profile.fat_finger_multiplier,
+            "gemini_without_notification_probability": config.human_profile.gemini_without_notification_probability,
             "early_exit_prob_min": config.human_profile.early_exit_prob_min,
             "early_exit_prob_max": config.human_profile.early_exit_prob_max,
             "early_exit_ratio_min": config.human_profile.early_exit_ratio_min,
@@ -147,6 +148,9 @@ class BehavioralModel:
 
     def activity_cutoff_s(self) -> float:
         return self._activity_cutoff_s
+
+    def should_select_gemini_without_notification(self) -> bool:
+        return self._rng.random() < self._profile.gemini_without_notification_probability
 
     def should_click_notification(self) -> bool:
         return self._rng.random() < self._profile.notif_hit_rate
