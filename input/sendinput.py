@@ -99,6 +99,41 @@ class SendInputBackend(InputBackend):
         user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
         return time.perf_counter_ns() / 1e9
 
+    def click_pair(
+        self,
+        first: tuple[int, int],
+        second: tuple[int, int],
+    ) -> tuple[float, float, float, float]:
+        """Dispatch two complete clicks in one SendInput batch.
+
+        The returned timestamps are the authoritative dispatch timestamps used
+        by the twin scheduler to enforce the <=30 ms mouse-down contract.
+        """
+        inputs_list = []
+        for screen_x, screen_y in (first, second):
+            norm_x, norm_y = screen_to_sendinput(
+                screen_x, screen_y,
+                self._virtual.left, self._virtual.top,
+                self._virtual.width, self._virtual.height,
+            )
+            inputs_list.extend([
+                _make_input(norm_x, norm_y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE),
+                _make_input(0, 0, MOUSEEVENTF_LEFTDOWN),
+                _make_input(0, 0, MOUSEEVENTF_LEFTUP),
+            ])
+
+        inputs = (INPUT * len(inputs_list))(*inputs_list)
+        sent = user32.SendInput(
+            len(inputs_list), ctypes.byref(inputs), ctypes.sizeof(INPUT)
+        )
+        if sent != len(inputs_list):
+            raise RuntimeError(
+                f"SendInput pair dispatch incomplete: sent {sent}/{len(inputs_list)} events"
+            )
+
+        timestamp = time.perf_counter_ns() / 1e9
+        return timestamp, timestamp, timestamp, timestamp
+
     def click(self, x: int, y: int) -> float:
         return self.click_screen(x, y)
 

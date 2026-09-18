@@ -204,3 +204,114 @@ class ActionScheduler:
 
     def clear(self) -> None:
         self._active = None
+
+
+class PairInputBackend(Protocol):
+    def click_pair(self, first: tuple[int, int], second: tuple[int, int]) -> tuple[float, float, float, float]:
+        """Dispatch two complete clicks and return down/up timestamps."""
+
+
+@dataclass(frozen=True)
+class TwinActionCompletion:
+    """Completion record for one coordinated TwinAction."""
+    first: ActionTimestamps
+    second: ActionTimestamps
+    click_down_delta_ms: float
+
+
+class TwinActionScheduler:
+    """Coordinate two behavioral plans around one synchronized click phase."""
+
+    def __init__(self, clock=None) -> None:
+        self._clock = clock or now_monotonic
+        self._active: tuple[ActiveAction, ActiveAction] | None = None
+        self._max_click_delta_ms = 30.0
+
+    @property
+    def is_idle(self) -> bool:
+        return self._active is None or all(
+            action.phase == ActionPhase.COMPLETE for action in self._active
+        )
+
+    @property
+    def active_actions(self) -> tuple[ActiveAction, ActiveAction] | None:
+        return self._active
+
+    def start_action(self, first_behavior: BehavioralAction, first_x: int, first_y: int,
+                     second_behavior: BehavioralAction, second_x: int, second_y: int,
+                     *, max_click_delta_ms: float = 30.0) -> None:
+        if not self.is_idle:
+            return
+        now = self._clock()
+        first = ActiveAction(first_behavior, first_x, first_y, _clock=self._clock)
+        second = ActiveAction(second_behavior, second_x, second_y, _clock=self._clock)
+        first.timestamps.action_planned = now
+        first.timestamps.reaction_start = now
+        second.timestamps.action_planned = now
+        second.timestamps.reaction_start = now
+        self._max_click_delta_ms = max_click_delta_ms
+        self._active = (first, second)
+
+    def tick(self, input_backend: PairInputBackend) -> TwinActionCompletion | None:
+        if self._active is None:
+            return None
+        first, second = self._active
+        now = self._clock()
+        self._advance_reaction(first, now)
+        self._advance_reaction(second, now)
+        if first.phase == ActionPhase.MOVING:
+            self._advance_movement(first, input_backend, now)
+        if second.phase == ActionPhase.MOVING:
+            self._advance_movement(second, input_backend, now)
+        if first.phase != ActionPhase.CLICK_DOWN or second.phase != ActionPhase.CLICK_DOWN:
+            return None
+        if not hasattr(input_backend, "click_pair"):
+            raise TypeError("TwinActionScheduler requires InputBackend.click_pair")
+        first_down, first_up, second_down, second_up = input_backend.click_pair(
+            (first.target_x, first.target_y), (second.target_x, second.target_y)
+        )
+        delta_ms = abs(first_down - second_down) * 1000.0
+        if delta_ms > self._max_click_delta_ms:
+            raise RuntimeError(
+                f"Twin click synchronization exceeded {self._max_click_delta_ms:.1f} ms: {delta_ms:.3f} ms"
+            )
+        first.timestamps.click_down = first_down
+        first.timestamps.click_up = first_up
+        first.timestamps.action_complete = self._clock()
+        second.timestamps.click_down = second_down
+        second.timestamps.click_up = second_up
+        second.timestamps.action_complete = self._clock()
+        first.phase = ActionPhase.COMPLETE
+        second.phase = ActionPhase.COMPLETE
+        return TwinActionCompletion(first.timestamps, second.timestamps, delta_ms)
+
+    def clear(self) -> None:
+        self._active = None
+
+    @staticmethod
+    def _advance_reaction(action: ActiveAction, now: float) -> None:
+        if action.phase == ActionPhase.WAITING_REACTION and now - action.timestamps.reaction_start >= action.reaction_time_s:
+            action.timestamps.reaction_end = now
+            action.timestamps.movement_start = now
+            action.phase = ActionPhase.MOVING
+            action.trajectory_index = 0
+
+    @staticmethod
+    def _advance_movement(action: ActiveAction, input_backend: InputBackend, now: float) -> None:
+        trajectory = action.trajectory
+        if not trajectory:
+            action.timestamps.movement_end = now
+            input_backend.move_to(action.target_x, action.target_y)
+            action.phase = ActionPhase.CLICK_DOWN
+            return
+        while action.trajectory_index < len(trajectory):
+            pt = trajectory[action.trajectory_index]
+            target_t = action.timestamps.movement_start + pt.t
+            if now < target_t:
+                break
+            input_backend.move_to(int(pt.x), int(pt.y))
+            action.trajectory_index += 1
+        if action.trajectory_index >= len(trajectory):
+            input_backend.move_to(action.target_x, action.target_y)
+            action.timestamps.movement_end = now
+            action.phase = ActionPhase.CLICK_DOWN

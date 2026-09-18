@@ -16,7 +16,8 @@ from game_profiles.balloon_types import (
 from game_profiles.base import GameAction, GameProfile, GameType
 from vision.color_classifier import ColorClassifier
 from vision.g_symbol_detector import GSymbolDetector
-from vision.outline_detector import OutlineDetector
+from vision.outline_detector import OutlineDetector, OutlineResult
+from vision.detector import Detection
 from vision.ring_detector import RingDetector
 
 
@@ -146,6 +147,30 @@ class BalloonGameProfile(GameProfile):
 
         classified.sort(key=lambda d: (d.center[1], d.center[0], d.target_type.value))
         return [d.as_dict() for d in classified]
+
+    def to_tracking_detections(self, detections: list[dict]) -> list[Detection]:
+        """Adapt profile detections to the generic tracker without exposing game rules."""
+        tracking_detections: list[Detection] = []
+        for det in detections:
+            visual = det.get("visual_features", {})
+            outline = OutlineResult(
+                has_outline=bool(det.get("has_outline", False)),
+                white_ratio=float(det.get("outline_white_ratio", visual.get("white_border_ratio", 0.0))),
+                contrast=float(det.get("outline_contrast", visual.get("outline_contrast", 0.0))),
+            )
+            tracking_detections.append(
+                Detection(
+                    bbox=tuple(det.get("bbox", (0, 0, 0, 0))),
+                    center=tuple(det.get("center", (0, 0))),
+                    area=int(det.get("area", 0)),
+                    color_name=det.get("color_name") or "unknown",
+                    color_confidence=float(det.get("color_confidence", det.get("confidence", 0.0))),
+                    outline=outline,
+                    tracking_class=det.get("target_type"),
+                    metadata=dict(det),
+                )
+            )
+        return tracking_detections
 
     def select_targets(
         self,
