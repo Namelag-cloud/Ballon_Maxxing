@@ -464,6 +464,7 @@ class Application:
                         region.left,
                         region.top,
                         self._input_enabled,
+                        self._balloon_frame_decision.notifications,
                     )
                     clicks_this_frame = execution.clicks_sent
                     if execution.input_timestamp is not None:
