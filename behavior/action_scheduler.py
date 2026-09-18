@@ -178,6 +178,7 @@ class ActionScheduler:
         if self._active is None:
             return None
         action = self._active
+        previous_phase = action.phase.name
         action.timestamps.interrupted = True
         action.timestamps.cancel_reason = reason
         if action.phase == ActionPhase.CLICK_HOLD and input_backend is not None:
@@ -200,7 +201,7 @@ class ActionScheduler:
                 "scheduler_cancel",
                 scheduler="primary",
                 reason=reason,
-                phase=action.phase.name,
+                phase=previous_phase,
                 interrupted=True,
             )
         return timestamps
