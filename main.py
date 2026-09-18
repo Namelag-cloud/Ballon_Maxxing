@@ -172,14 +172,14 @@ class Application:
         self._current_fps = 0.0
 
     def _setup_hotkeys(self) -> None:
-        HK_F8 = 0x77
+        HK_RSHIFT = 0xA1
         HK_ESC = 0x1B
         WH_KEYBOARD_LL = 13
 
         def callback(nCode, wParam, lParam):
             if nCode >= 0 and wParam in (0x0100, 0x0104):
                 vk = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_uint)).contents.value
-                if vk == HK_F8:
+                if vk == HK_RSHIFT:
                     self._input_enabled = not self._input_enabled
                     print(f"[HOTKEY] Input {'ENABLED' if self._input_enabled else 'DISABLED'}")
                 elif vk == HK_ESC:
@@ -191,7 +191,7 @@ class Application:
         user32 = ctypes.windll.user32
         hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, None, 0)
         if not hook:
-            print("[WARNING] Failed to install keyboard hook. F8/ESC hotkeys unavailable.")
+            print("[WARNING] Failed to install keyboard hook. Right Shift/ESC hotkeys unavailable.")
             return
 
         msg = ctypes.wintypes.MSG()
@@ -452,7 +452,7 @@ class Application:
         if self._behavior:
             print(f"Behavioral model: enabled (seed={self._behavior.behavioral_seed})")
             print(f"Human profile: {self._behavior.profile.as_dict()}")
-        print("F8 = Toggle click on/off | ESC = Emergency stop")
+        print("RSHIFT = Toggle click on/off | ESC = Emergency stop")
 
         if self._startup_delay > 0:
             print(f"\nStarting in {self._startup_delay:.1f}s — switch to your game window now...")

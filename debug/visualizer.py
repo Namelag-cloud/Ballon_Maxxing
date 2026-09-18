@@ -129,7 +129,7 @@ class DebugVisualizer:
         cv2.putText(vis, f"Mode: {mode_text}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
         cv2.putText(vis, f"FPS: {fps:.1f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         cv2.putText(vis, f"Tracks: {len(tracks)}  Actions: {len(actions)}", (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-        cv2.putText(vis, "F8=Toggle Click  ESC=Quit", (10, vis.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+        cv2.putText(vis, "Right Shift=Toggle Click  ESC=Quit", (10, vis.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
 
         return vis
 
