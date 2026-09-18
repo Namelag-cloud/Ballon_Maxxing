@@ -175,7 +175,10 @@ class BalloonExecutor:
                     outcomes.append(self._make_outcome(first_a.behavioral_action, twin_completion.first, first_a.target_x, first_a.target_y, first_b.target_type.value, twin_completion.click_down_delta_ms, first_b.target_id))
                     outcomes.append(self._make_outcome(second_a.behavioral_action, twin_completion.second, second_a.target_x, second_a.target_y, second_b.target_type.value, twin_completion.click_down_delta_ms, second_b.target_id))
             self._active_primary = None
-            self._idle_until = self._clock() + (self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0)
+            idle_gap = self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0
+            self._idle_until = self._clock() + idle_gap
+            if self._diagnostic:
+                self._diagnostic.log("action_complete", lane="twin", idle_gap_s=idle_gap, idle_until=self._idle_until)
 
         primary_completion = self._primary_scheduler.tick(input_backend)
         if primary_completion is not None:
@@ -189,7 +192,10 @@ class BalloonExecutor:
                     outcomes.append(self._make_outcome(active.behavioral_action, primary_completion, active.target_x, active.target_y, completed_primary_action.target_type.value, target_id=completed_primary_action.target_id))
             self._active_primary = None
             self._primary_scheduler.clear()
-            self._idle_until = self._clock() + (self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0)
+            idle_gap = self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0
+            self._idle_until = self._clock() + idle_gap
+            if self._diagnostic:
+                self._diagnostic.log("action_complete", lane="primary", target=self._action_info(completed_primary_action), idle_gap_s=idle_gap, idle_until=self._idle_until)
 
         return BalloonExecutionResult(
             clicks_sent=clicks,
@@ -302,6 +308,64 @@ class BalloonExecutor:
             gemini_completed=None,
             observation_notes=["UNOBSERVABLE THROUGH CURRENT INTERFACE: authoritative spawnTick/popTick/hit state; click tick is a relative estimate from first-seen"],
         )
+
+    def _behavior_gate_state(self, duration_s):
+        if not isinstance(self._behavior, BehavioralModel):
+            return {}
+        elapsed = self._behavior.session_elapsed_s()
+        cutoff = self._behavior.activity_cutoff_s()
+        deadline = None if not duration_s or duration_s <= 0 else duration_s - cutoff
+        return {
+            "session_started": self._behavior._session_started,
+            "session_elapsed_s": elapsed,
+            "start_delay_s": self._behavior.start_delay_s,
+            "actions_ready": self._behavior.actions_ready(),
+            "activity_cutoff_s": cutoff,
+            "final_activity_deadline_s": deadline,
+            "final_activity_cutoff_active": bool(deadline is not None and elapsed >= deadline),
+        }
+
+    def _g_start_block_reason(self, input_enabled, actions_allowed):
+        if not self._g_should_execute:
+            return "behavioral_g_abandon"
+        if not self._g_scheduler.is_idle:
+            return "g_scheduler_busy"
+        if not input_enabled:
+            return "input_disabled"
+        if not actions_allowed:
+            return "behavioral_start_gate"
+        return None
+
+    @staticmethod
+    def _action_info(action):
+        if action is None:
+            return None
+        if isinstance(action, TwinAction):
+            return {"type": "TwinAction", "targets": [BalloonExecutor._action_info(t) for t in action.targets]}
+        return {
+            "type": action.target_type.value,
+            "id": action.target_id,
+            "color": action.color.value if action.color else None,
+            "position": list(action.position),
+            "width": action.target_width,
+        }
+
+    def _active_info(self, active):
+        if active is None:
+            return None
+        return {
+            "phase": active.phase.name,
+            "target_x": active.target_x,
+            "target_y": active.target_y,
+            "intended_target_x": active.intended_target_x,
+            "intended_target_y": active.intended_target_y,
+        }
+
+    def _active_twin_info(self):
+        active = self._twin_scheduler.active_actions
+        if active is None:
+            return None
+        return [{"phase": a.phase.name, "target_x": a.target_x, "target_y": a.target_y} for a in active]
 
     @staticmethod
     def _to_screen(position, region_left, region_top):
