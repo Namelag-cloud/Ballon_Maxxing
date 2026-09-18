@@ -16,6 +16,7 @@ class DecisionResult:
     actions: tuple[BalloonAction | TwinAction, ...]
     g_action: BalloonAction | None
     multicolor_specials: tuple[BalloonAction, ...]
+    notifications: tuple[BalloonAction, ...]
     mode: GameMode
     special_step: SpecialSequenceStep
 
@@ -73,10 +74,13 @@ class BalloonDecisionEngine:
         if executable_specials:
             actions = list(actions) + executable_specials
 
+        notification_actions = tuple(self._make_action(d) for d in notifications)
+
         return DecisionResult(
             actions=tuple(actions),
             g_action=g_action,
             multicolor_specials=tuple(executable_specials),
+            notifications=notification_actions,
             mode=self.state.mode,
             special_step=self.state.special_step,
         )
