@@ -121,6 +121,7 @@ class Application:
         game_profile: Optional[GameProfile] = None,
         duration: Optional[float] = None,
         startup_delay: float = 3.0,
+        fast_execution: bool = False,
     ) -> None:
         self._settings = settings
         self._running = True
@@ -128,6 +129,7 @@ class Application:
         self._mode = settings.mode
         self._duration = duration
         self._startup_delay = startup_delay
+        self._fast_execution = fast_execution
         self._start_time = now_monotonic()
         self._game_profile = game_profile
 
@@ -161,7 +163,11 @@ class Application:
             )
             self._action_scheduler = ActionScheduler()
             if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
-                self._balloon_executor = BalloonExecutor(self._behavior, diagnostic=self._diagnostic)
+                self._balloon_executor = BalloonExecutor(
+                    self._behavior,
+                    diagnostic=self._diagnostic,
+                    fast_execution=self._fast_execution,
+                )
         if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
             self._balloon_decision = BalloonDecisionEngine(settings)
 
@@ -486,6 +492,8 @@ class Application:
         if self._behavior:
             print(f"Behavioral model: enabled (seed={self._behavior.behavioral_seed})")
             print(f"Human profile: {self._behavior.profile.as_dict()}")
+        if self._fast_execution:
+            print("Balloon execution: FAST (immediate SendInput dispatch)")
         print("RSHIFT = Toggle click on/off | ESC = Emergency stop")
 
         if self._startup_delay > 0:
@@ -507,7 +515,7 @@ class Application:
         else:
             print("Input is ACTIVE. Move mouse to safe area if needed.\n")
 
-        if self._behavior and not self._behavior._session_started:
+        if self._behavior and not self._behavior._session_started and not self._fast_execution:
             self._behavior.start_session()
             print(f"Sampled behavioral start-delay parameter: {self._behavior.start_delay_s:.3f}s")
 
@@ -516,7 +524,7 @@ class Application:
                 if self._duration and (now_monotonic() - self._start_time) >= self._duration:
                     print(f"\nDuration limit reached ({self._duration}s)")
                     break
-                if self._behavior and self._behavior.should_early_exit(self._duration):
+                if self._behavior and not self._fast_execution and self._behavior.should_early_exit(self._duration):
                     print("\nBehavioral model sampled an early session exit.")
                     break
 
@@ -541,7 +549,11 @@ class Application:
                 region = self._settings.capture.region
 
                 if self._balloon_executor and self._balloon_frame_decision is not None:
-                    new_actions_allowed = not self._behavior or self._behavior.should_start_new_action(self._duration)
+                    new_actions_allowed = (
+                        self._fast_execution
+                        or not self._behavior
+                        or self._behavior.should_start_new_action(self._duration)
+                    )
                     if self._diagnostic:
                         self._diagnostic.log("frame_to_executor", frame_id=self._frame_count, passed=new_actions_allowed, decision_actions=[self._action_info_for_diag(a) for a in self._balloon_frame_decision.actions], passed_actions=[self._action_info_for_diag(a) for a in (self._balloon_frame_decision.actions if new_actions_allowed else ())], g_passed=new_actions_allowed and self._balloon_frame_decision.g_action is not None, notification_count=len(self._balloon_frame_decision.notifications) if new_actions_allowed else 0, multicolor_count=len(self._balloon_frame_decision.multicolor_specials) if new_actions_allowed else 0, behavioral_gate=self._behavior_gate_diag(self._duration))
                     executor_t0 = now_monotonic()
@@ -821,6 +833,11 @@ def parse_args(argv=None):
         default=3.0,
         help="Seconds to wait before sending input in LIVE mode (default: 3.0, 0 to disable)",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Balloon mode: bypass behavioral reaction/movement/click delays and dispatch input immediately",
+    )
     return parser.parse_args(argv)
 
 
@@ -871,7 +888,13 @@ def main():
         print(f"Startup delay: {args.startup_delay}s")
     print()
 
-    app = Application(settings, game_profile=game_profile, duration=args.duration, startup_delay=args.startup_delay)
+    app = Application(
+        settings,
+        game_profile=game_profile,
+        duration=args.duration,
+        startup_delay=args.startup_delay,
+        fast_execution=args.fast,
+    )
     app.run()
 
 
