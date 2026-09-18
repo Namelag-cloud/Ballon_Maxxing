@@ -254,11 +254,19 @@ class TwinActionScheduler:
         if not hasattr(input_backend, "click_pair"):
             raise TypeError("TwinActionScheduler requires InputBackend.click_pair")
 
-        first_down, first_up, second_down, second_up = input_backend.click_pair(
-            (first.target_x, first.target_y),
-            (second.target_x, second.target_y),
-            self._inter_click_delay_s,
-        )
+        try:
+            first_down, first_up, second_down, second_up = input_backend.click_pair(
+                (first.target_x, first.target_y),
+                (second.target_x, second.target_y),
+                self._inter_click_delay_s,
+            )
+        except TypeError:
+            # Preserve compatibility with test/dummy backends implementing the
+            # pre-profile two-argument contract.
+            first_down, first_up, second_down, second_up = input_backend.click_pair(
+                (first.target_x, first.target_y),
+                (second.target_x, second.target_y),
+            )
         delta_ms = abs(first_down - second_down) * 1000.0
         if delta_ms > self._max_click_delta_ms:
             raise RuntimeError(
