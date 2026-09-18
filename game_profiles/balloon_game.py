@@ -82,9 +82,21 @@ class BalloonGameProfile(GameProfile):
             "yellow_components_ms": 0.0,
             "green_components_ms": 0.0,
             "blue_component_analysis_ms": 0.0,
+            "blue_component_mask_allocation_ms": 0.0,
+            "blue_component_mask_label_ms": 0.0,
+            "blue_component_classification_ms": 0.0,
             "red_component_analysis_ms": 0.0,
+            "red_component_mask_allocation_ms": 0.0,
+            "red_component_mask_label_ms": 0.0,
+            "red_component_classification_ms": 0.0,
             "yellow_component_analysis_ms": 0.0,
+            "yellow_component_mask_allocation_ms": 0.0,
+            "yellow_component_mask_label_ms": 0.0,
+            "yellow_component_classification_ms": 0.0,
             "green_component_analysis_ms": 0.0,
+            "green_component_mask_allocation_ms": 0.0,
+            "green_component_mask_label_ms": 0.0,
+            "green_component_classification_ms": 0.0,
             "multicolor_ms": 0.0,
             "g_detector_ms": 0.0,
             "ring_total_ms": 0.0,
@@ -335,6 +347,9 @@ class BalloonGameProfile(GameProfile):
 
         detections: list[TargetDetection] = []
         color = BalloonColor(color_name)
+        mask_alloc_ms_total = 0.0
+        mask_label_ms_total = 0.0
+        classification_ms_total = 0.0
         frame_height = float(hsv.shape[0])
 
         component_analysis_t0 = time.perf_counter()
@@ -347,8 +362,14 @@ class BalloonGameProfile(GameProfile):
             if w <= 0 or h <= 0:
                 continue
 
+            mask_alloc_t0 = time.perf_counter()
             component_mask = np.zeros((h, w), dtype=np.uint8)
+            mask_alloc_ms = (time.perf_counter() - mask_alloc_t0) * 1000.0
+            mask_label_t0 = time.perf_counter()
             component_mask[labels[y:y + h, x:x + w] == label] = 255
+            mask_label_ms = (time.perf_counter() - mask_label_t0) * 1000.0
+            mask_alloc_ms_total += mask_alloc_ms
+            mask_label_ms_total += mask_label_ms
             contour_list, hierarchy = cv2.findContours(
                 component_mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
             )
@@ -407,9 +428,12 @@ class BalloonGameProfile(GameProfile):
             ):
                 continue
 
+            classification_t0 = time.perf_counter()
             color_name_detected, confidence = self._classifier.classify_mask(
                 hsv[y:y + h, x:x + w], component_mask
             )
+            classification_ms = (time.perf_counter() - classification_t0) * 1000.0
+            classification_ms_total += classification_ms
             if color_name_detected != color_name or confidence < self._settings.detection.min_confidence:
                 continue
 
@@ -434,6 +458,9 @@ class BalloonGameProfile(GameProfile):
         self._last_profile[f"{color_name}_morphology_ms"] = morphology_ms
         self._last_profile[f"{color_name}_components_ms"] = components_ms
         self._last_profile[f"{color_name}_component_analysis_ms"] = component_analysis_ms
+        self._last_profile[f"{color_name}_component_mask_allocation_ms"] = mask_alloc_ms_total
+        self._last_profile[f"{color_name}_component_mask_label_ms"] = mask_label_ms_total
+        self._last_profile[f"{color_name}_component_classification_ms"] = classification_ms_total
         self._last_profile["candidate_counts"][color_name] = len(detections)
         return detections
 
