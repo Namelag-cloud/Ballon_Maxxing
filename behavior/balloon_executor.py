@@ -115,7 +115,7 @@ class BalloonExecutor:
             input_timestamp = g_completion.click_up
             g_active = self._g_scheduler.active_action
             if g_active is not None:
-                outcomes.append(self._make_outcome(g_active.behavioral_action, g_completion, g_active.target_x, g_active.target_y, "g_symbol"))
+                outcomes.append(self._make_outcome(g_active.behavioral_action, g_completion, g_active.target_x, g_active.target_y, "g_symbol", target_id=self._latest_g.target_id if self._latest_g else None))
 
         if g_completion is not None and self._g_visible and input_enabled:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
@@ -158,8 +158,8 @@ class BalloonExecutor:
                 first_b, second_b = self._active_primary.targets
                 if self._twin_scheduler.active_actions is not None:
                     first_a, second_a = self._twin_scheduler.active_actions
-                    outcomes.append(self._make_outcome(first_a.behavioral_action, twin_completion.first, first_a.target_x, first_a.target_y, first_b.target_type.value, twin_completion.click_down_delta_ms))
-                    outcomes.append(self._make_outcome(second_a.behavioral_action, twin_completion.second, second_a.target_x, second_a.target_y, second_b.target_type.value, twin_completion.click_down_delta_ms))
+                    outcomes.append(self._make_outcome(first_a.behavioral_action, twin_completion.first, first_a.target_x, first_a.target_y, first_b.target_type.value, twin_completion.click_down_delta_ms, first_b.target_id))
+                    outcomes.append(self._make_outcome(second_a.behavioral_action, twin_completion.second, second_a.target_x, second_a.target_y, second_b.target_type.value, twin_completion.click_down_delta_ms, second_b.target_id))
             self._active_primary = None
             self._idle_until = self._clock() + (self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0)
 
@@ -172,7 +172,7 @@ class BalloonExecutor:
                 completed_primary_action = self._active_primary
                 active = self._primary_scheduler.active_action
                 if active is not None:
-                    outcomes.append(self._make_outcome(active.behavioral_action, primary_completion, active.target_x, active.target_y, completed_primary_action.target_type.value))
+                    outcomes.append(self._make_outcome(active.behavioral_action, primary_completion, active.target_x, active.target_y, completed_primary_action.target_type.value, target_id=completed_primary_action.target_id))
             self._active_primary = None
             self._primary_scheduler.clear()
             self._idle_until = self._clock() + (self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0)
@@ -241,6 +241,7 @@ class BalloonExecutor:
         screen_y: int,
         target_type: str,
         duo_delta_ms: float | None = None,
+        target_id: int | None = None,
     ) -> SessionOutcome:
         observed_reaction = None
         estimated_click_tick = None
@@ -257,6 +258,7 @@ class BalloonExecutor:
         movement_duration_ms = max(0.0, (timestamps.movement_end - timestamps.movement_start) * 1000.0)
         is_gemini = target_type == "multicolor_special"
         return SessionOutcome(
+            target_id=target_id,
             target_type=target_type,
             target_first_seen_ts=behavioral_action.acquisition_timestamp,
             acquisition_ts=behavioral_action.acquisition_timestamp,
