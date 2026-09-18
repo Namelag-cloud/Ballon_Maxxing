@@ -93,6 +93,7 @@ class EndpointErrorConfig:
     fat_finger_probability: float = 0.02
     fat_finger_multiplier: float = 2.0
     gemini_without_notification_probability: float = 0.01
+    final_activity_cutoff_s: float = 1.5
 
 
 @dataclass
