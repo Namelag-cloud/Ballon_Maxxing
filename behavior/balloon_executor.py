@@ -297,6 +297,71 @@ class BalloonExecutor:
     def _target_id_observed(cls, target_id, actions, notifications, multicolor_specials) -> bool:
         return target_id in cls._observed_target_ids(actions, notifications, multicolor_specials)
 
+    def shutdown(self, input_backend, reason: str = "session_end") -> tuple[SessionOutcome, ...]:
+        """Stop schedulers and release any button held by an interrupted action."""
+        outcomes: list[SessionOutcome] = []
+
+        active = self._primary_scheduler.active_action
+        if active is not None and not self._primary_scheduler.is_idle:
+            action = self._active_primary
+            timestamps = self._primary_scheduler.cancel(input_backend=input_backend, reason=reason)
+            if timestamps is not None and isinstance(action, BalloonAction):
+                outcomes.append(
+                    self._make_outcome(
+                        active.behavioral_action,
+                        timestamps,
+                        active.target_x,
+                        active.target_y,
+                        action.target_type.value,
+                        target_id=action.target_id,
+                        execution_status="interrupted",
+                    )
+                )
+            self._active_primary = None
+
+        twin_active = self._twin_scheduler.active_actions
+        if twin_active is not None and not self._twin_scheduler.is_idle:
+            action = self._active_primary
+            self._twin_scheduler.clear()
+            if isinstance(action, TwinAction):
+                for active_action, target in zip(twin_active, action.targets):
+                    timestamps = active_action.timestamps
+                    timestamps.interrupted = True
+                    timestamps.cancel_reason = reason
+                    timestamps.action_complete = self._clock()
+                    outcomes.append(
+                        self._make_outcome(
+                            active_action.behavioral_action,
+                            timestamps,
+                            active_action.target_x,
+                            active_action.target_y,
+                            target.target_type.value,
+                            target_id=target.target_id,
+                            execution_status="interrupted",
+                        )
+                    )
+            self._active_primary = None
+
+        active_g = self._g_scheduler.active_action
+        if active_g is not None and not self._g_scheduler.is_idle:
+            timestamps = self._g_scheduler.cancel(input_backend=input_backend, reason=reason)
+            if timestamps is not None:
+                outcomes.append(
+                    self._make_outcome(
+                        active_g.behavioral_action,
+                        timestamps,
+                        active_g.target_x,
+                        active_g.target_y,
+                        "g_symbol",
+                        target_id=self._latest_g.target_id if self._latest_g else None,
+                        execution_status="interrupted",
+                    )
+                )
+
+        if self._diagnostic:
+            self._diagnostic.log("session_shutdown", reason=reason, interrupted_actions=len(outcomes))
+        return tuple(outcomes)
+
     def _start_single(self, scheduler, action: BalloonAction | None, region_left: int, region_top: int) -> None:
         if action is None:
             return
@@ -352,6 +417,7 @@ class BalloonExecutor:
         target_type: str,
         duo_delta_ms: float | None = None,
         target_id: int | None = None,
+        execution_status: str = "completed",
     ) -> SessionOutcome:
         observed_reaction = None
         estimated_click_tick = None
@@ -396,6 +462,7 @@ class BalloonExecutor:
             gemini_selected=is_gemini,
             gemini_executed=(timestamps.click_down > 0),
             gemini_completed=None,
+            execution_status=execution_status,
             observation_notes=["UNOBSERVABLE THROUGH CURRENT INTERFACE: authoritative spawnTick/popTick/hit state; click tick is a relative estimate from first-seen"],
         )
 
