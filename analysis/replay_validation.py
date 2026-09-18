@@ -7,6 +7,9 @@ from dataclasses import dataclass
 
 
 TICK_RATE_MS = 1000.0 / 60.0
+
+# This module validates the bot's captured interaction structure only. It does
+# not replay the game engine, server, seed, or authoritative pop/hit state.
 DUO_WINDOW_TICKS = 45
 
 
@@ -60,7 +63,7 @@ def validate_interactions(interactions: list[dict]) -> ValidationResult:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate structural properties of captured game interactions.")
+    parser = argparse.ArgumentParser(description="Validate captured interaction structure (not an authoritative game replay).")
     parser.add_argument("session", type=str, help="JSON file containing an interactions array.")
     args = parser.parse_args()
     data = json.load(open(args.session))
