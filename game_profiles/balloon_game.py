@@ -408,7 +408,7 @@ class BalloonGameProfile(GameProfile):
                 continue
 
             color_name_detected, confidence = self._classifier.classify_mask(
-                hsv, component_mask
+                hsv[y:y + h, x:x + w], component_mask
             )
             if color_name_detected != color_name or confidence < self._settings.detection.min_confidence:
                 continue
