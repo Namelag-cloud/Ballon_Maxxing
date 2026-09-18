@@ -167,6 +167,20 @@ def ks_distance(a, b):
     return best
 
 
+def metric_values(rows, key):
+    if key != "spatial_error_normalized_by_target_radius":
+        return values(rows, key)
+    result = []
+    for row in rows:
+        try:
+            radius = float(row.get("target_radius_px"))
+            if radius > 0:
+                result.append(float(row.get("endpoint_error_px")) / radius)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
 def compare(bot_rows, reference_rows):
     keys = {
         "reaction_interval_ticks": "estimated_acquisition_click_ticks",
@@ -175,8 +189,8 @@ def compare(bot_rows, reference_rows):
     }
     result = {}
     for metric, key in keys.items():
-        bot = values(bot_rows, key)
-        ref = values(reference_rows, key)
+        bot = metric_values(bot_rows, key)
+        ref = metric_values(reference_rows, key)
         result[metric] = {
             "bot": numeric_stats(bot),
             "reference": numeric_stats(ref),
