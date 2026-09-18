@@ -93,6 +93,8 @@ class TestBehavioralReplayValidation(unittest.TestCase):
         model = BehavioralModel(BehaviorConfig(enabled=True, seed=4, human_profile=profile))
         model.start_session()
         self.assertFalse(model.should_early_exit(10.0))
+        model._session_start -= 6.0
+        self.assertTrue(model.should_early_exit(10.0))
     def test_scheduler_uses_behavioral_endpoint_not_center(self):
         scheduler = ActionScheduler()
         action = make_action(123.4, 234.6)
@@ -118,6 +120,7 @@ class TestBehavioralReplayValidation(unittest.TestCase):
         self.assertTrue(any("UNOBSERVABLE THROUGH CURRENT INTERFACE" in note for note in obs.notes))
         self.assertIsNone(obs.combo_value)
         self.assertIsNone(obs.score_value)
+        self.assertIsNone(obs.pop_detected)
 
     def test_gemini_candidate_requires_observed_notification(self):
         engine = BalloonDecisionEngine(Settings())
