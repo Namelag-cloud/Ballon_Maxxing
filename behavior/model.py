@@ -238,13 +238,13 @@ class BehavioralModel:
         base = self._profile.reaction_mu_ticks
         sample = self._rng.lognormal(math.log(max(1.0, base)), self._profile.reaction_sigma)
         correlated = self._profile.reaction_ar1 * self._last_reaction_ticks + (1.0 - self._profile.reaction_ar1) * sample
-        intended_ticks = max(9.0, correlated)
+        intended_ticks = max(9.0, correlated + self._profile.perception_ticks)
         if is_delayed:
             intended_ticks += self._rng.uniform(12.0, 48.0)
         intended_ticks *= (1.0 + modifier)
         self._last_reaction_ticks = intended_ticks
-        # Perception is a modeled component of the intended acquisition-to-click
-        # interval. Do not subtract it from the scheduled delay: doing so makes
+        # Perception is included in the intended acquisition-to-click interval.
+        # Do not subtract it from the scheduled delay: doing so makes
         # the observed interval systematically shorter than the intended one.
         reaction_s = intended_ticks * ENGINE_TICK_MS / 1000.0
 
