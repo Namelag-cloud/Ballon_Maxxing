@@ -9,6 +9,7 @@ from game_profiles.balloon_types import BalloonAction, TwinAction
 from input.coordinates import frame_to_screen
 from telemetry.outcome import SessionOutcome
 from telemetry.timing import now_monotonic
+from diagnostics.downstream import DownstreamDiagnostic
 
 
 class PairInputBackend(Protocol):
@@ -35,12 +36,13 @@ class BalloonExecutionResult:
 class BalloonExecutor:
     """Execute visible decisions through the stochastic behavioral model."""
 
-    def __init__(self, behavior: BehavioralModel, clock=None, initial_mouse_position=(0, 0)) -> None:
+    def __init__(self, behavior: BehavioralModel, clock=None, initial_mouse_position=(0, 0), diagnostic: DownstreamDiagnostic | None = None) -> None:
         self._clock = clock or now_monotonic
         self._behavior = behavior
-        self._primary_scheduler = ActionScheduler(clock=clock)
-        self._twin_scheduler = TwinActionScheduler(clock=clock)
-        self._g_scheduler = ActionScheduler(clock=clock)
+        self._diagnostic = diagnostic
+        self._primary_scheduler = ActionScheduler(clock=clock, diagnostic=diagnostic)
+        self._twin_scheduler = TwinActionScheduler(clock=clock, diagnostic=diagnostic)
+        self._g_scheduler = ActionScheduler(clock=clock, diagnostic=diagnostic)
         self._current_mouse = initial_mouse_position
         self._active_primary: BalloonAction | TwinAction | None = None
         self._latest_g: BalloonAction | None = None
