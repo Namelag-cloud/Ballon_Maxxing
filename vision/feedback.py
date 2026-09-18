@@ -12,7 +12,7 @@ class FeedbackObservation:
     timestamp: float
     combo_present: bool
     combo_value: Optional[int]
-    pop_detected: bool
+    pop_detected: Optional[bool]
     score_changed: bool
     score_value: Optional[int]
     confidence: float
@@ -64,7 +64,7 @@ class FeedbackReader:
         pop = self._crop(frame, self.pop_roi)
         combo_changed = self._change(combo, "combo")
         score_changed = self._change(score, "score")
-        pop_changed = self._change(pop, "pop")
+        self._change(pop, "pop")  # visual change only; never an authoritative pop oracle
 
         notes = []
         if self.combo_roi is None:
@@ -73,15 +73,19 @@ class FeedbackReader:
             notes.append(f"score: {self.UNOBSERVABLE}")
         if self.pop_roi is None:
             notes.append(f"pop: {self.UNOBSERVABLE}")
+        else:
+            notes.append(f"pop result: {self.UNOBSERVABLE}; configured ROI provides visual-change telemetry only")
 
         configured = sum(v is not None for v in (self.combo_roi, self.score_roi, self.pop_roi))
-        confidence = 0.0 if configured == 0 else min(1.0, configured / 3.0)
+        # Configuring an ROI does not make the signal authoritative; until
+        # validated recognition is supplied, semantic feedback remains unknown.
+        confidence = 0.0
 
         return FeedbackObservation(
             timestamp=timestamp,
             combo_present=combo is not None,
             combo_value=None,
-            pop_detected=pop_changed if pop is not None else False,
+            pop_detected=None,
             score_changed=score_changed,
             score_value=None,
             confidence=confidence,
