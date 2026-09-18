@@ -681,6 +681,12 @@ class Application:
                         gui_show_ms=gui_show_ms,
                         diagnostic_ms=self._diagnostic.frame_log_duration_ms,
                         frame_total_ms=(now_monotonic() - t_start) * 1000.0,
+                        vision_profile=(
+                            self._game_profile.last_profile
+                            if self._game_profile is not None
+                            and self._game_profile.game_type == GameType.BALLOON_GAME
+                            else None
+                        ),
                     )
 
                 if key == 27:
