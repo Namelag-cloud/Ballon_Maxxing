@@ -86,6 +86,7 @@ class BehavioralModel:
             "fat_finger_probability": config.human_profile.fat_finger_probability,
             "fat_finger_multiplier": config.human_profile.fat_finger_multiplier,
             "gemini_without_notification_probability": config.human_profile.gemini_without_notification_probability,
+            "final_activity_cutoff_s": config.human_profile.final_activity_cutoff_s,
             "early_exit_prob_min": config.human_profile.early_exit_prob_min,
             "early_exit_prob_max": config.human_profile.early_exit_prob_max,
             "early_exit_ratio_min": config.human_profile.early_exit_ratio_min,
@@ -102,7 +103,7 @@ class BehavioralModel:
         self._last_reaction_ticks = self._profile.reaction_mu_ticks
         self._sampled_start_delay_s = self._profile.start_delay_sec
         self._early_exit_selected = False
-        self._activity_cutoff_s = 1.5
+        self._activity_cutoff_s = config.human_profile.final_activity_cutoff_s
 
     @property
     def config(self) -> BehaviorConfig:
@@ -148,6 +149,12 @@ class BehavioralModel:
 
     def activity_cutoff_s(self) -> float:
         return self._activity_cutoff_s
+
+    def should_abandon_balloon_g(self) -> bool:
+        return self._rng.random() < self._profile.balloon_g_abandon_rate
+
+    def should_fail_super_g(self) -> bool:
+        return self._rng.random() < self._profile.super_g_fail_rate
 
     def should_select_gemini_without_notification(self) -> bool:
         return self._rng.random() < self._profile.gemini_without_notification_probability
