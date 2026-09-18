@@ -37,6 +37,8 @@ class ActiveAction:
     phase: ActionPhase = ActionPhase.WAITING_REACTION
     timestamps: ActionTimestamps = field(default_factory=ActionTimestamps)
     trajectory_index: int = 0
+    intended_target_x: int | None = None
+    intended_target_y: int | None = None
     _clock: callable = field(default_factory=lambda: now_monotonic, repr=False)
 
     @property
@@ -93,6 +95,8 @@ class ActionScheduler:
             target_x=int(round(behavioral_action.click_position[0])),
             target_y=int(round(behavioral_action.click_position[1])),
             phase=ActionPhase.WAITING_REACTION,
+            intended_target_x=int(target_x),
+            intended_target_y=int(target_y),
             _clock=self._clock,
         )
         # Keep the explicit arguments for backwards-compatible call sites, but
@@ -123,6 +127,8 @@ class ActionScheduler:
                 action.phase = ActionPhase.CLICK_DOWN
             else:
                 self._tick_trajectory(action, input_backend, now)
+            if action.phase == ActionPhase.CLICK_DOWN:
+                return None
 
         if action.phase == ActionPhase.CLICK_DOWN:
             action.timestamps.click_down = input_backend.left_down()
@@ -216,11 +222,15 @@ class TwinActionScheduler:
         now = self._clock()
         first = ActiveAction(
             first_behavior, int(round(first_behavior.click_position[0])),
-            int(round(first_behavior.click_position[1])), _clock=self._clock
+            int(round(first_behavior.click_position[1])),
+            intended_target_x=int(first_x), intended_target_y=int(first_y),
+            _clock=self._clock
         )
         second = ActiveAction(
             second_behavior, int(round(second_behavior.click_position[0])),
-            int(round(second_behavior.click_position[1])), _clock=self._clock
+            int(round(second_behavior.click_position[1])),
+            intended_target_x=int(second_x), intended_target_y=int(second_y),
+            _clock=self._clock
         )
         first.timestamps.action_planned = second.timestamps.action_planned = now
         first.timestamps.reaction_start = second.timestamps.reaction_start = now
