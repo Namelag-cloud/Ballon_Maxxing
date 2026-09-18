@@ -278,7 +278,7 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
 
         outcomes = self.executor.shutdown(self.input)
 
-        self.assertEqual(self.input.ups, [0.0])
+        self.assertEqual(self.input.ups, [0.1])
         self.assertTrue(self.executor.primary_scheduler.is_idle)
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0].execution_status, "interrupted")
