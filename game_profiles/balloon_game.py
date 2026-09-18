@@ -34,6 +34,8 @@ class BalloonGameProfile(GameProfile):
     """
 
     _CORE_FILL_MIN = 0.55
+    _CORE_MIN_ASPECT_RATIO = 0.75
+    _CORE_MAX_ASPECT_RATIO = 1.30
     # A balloon core should occupy most, but not essentially all, of its
     # bounding box. This rejects solid UI bars/panels without using screen
     # coordinates, while remaining tolerant of balloons clipped by a frame edge.
@@ -423,9 +425,11 @@ class BalloonGameProfile(GameProfile):
                 continue
 
             fill_ratio = float(area) / float(w * h)
+            aspect_ratio = float(w) / float(h)
             if not (
                 self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
                 and circularity >= self._CORE_MIN_CIRCULARITY
+                and self._CORE_MIN_ASPECT_RATIO <= aspect_ratio <= self._CORE_MAX_ASPECT_RATIO
             ):
                 continue
 
@@ -438,7 +442,7 @@ class BalloonGameProfile(GameProfile):
                     "bbox": (x, y, w, h),
                     "width": w,
                     "height": h,
-                    "aspect_ratio": float(w) / float(h),
+                    "aspect_ratio": aspect_ratio,
                     "area": area,
                     "fill_ratio": float(fill_ratio),
                     "circularity": float(circularity),
