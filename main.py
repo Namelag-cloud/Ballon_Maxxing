@@ -639,6 +639,9 @@ class Application:
 
         self._telemetry.save()
         print(f"\nTelemetry saved to {self._telemetry._output_dir}")
+        if self._diagnostic:
+            self._diagnostic.close()
+            print(f"Diagnostic trace saved to {self._diagnostic.path}")
 
     def _print_benchmark_results(self, durations: list[float], frame_times: list[float]) -> None:
         print("\n" + "=" * 60)
