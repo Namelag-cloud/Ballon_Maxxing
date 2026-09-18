@@ -70,7 +70,7 @@ class BalloonExecutor:
     def latest_g(self) -> BalloonAction | None:
         return self._latest_g
 
-    def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=(), multicolor_specials=()) -> BalloonExecutionResult:
+    def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=(), multicolor_specials=(), duration_s=None) -> BalloonExecutionResult:
         now = self._clock()
         self._g_visible = g_action is not None
         if g_action is None:
@@ -120,7 +120,7 @@ class BalloonExecutor:
         if g_completion is not None and self._g_visible and input_enabled:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
-        actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)() and getattr(self._behavior, "should_start_new_action", lambda _duration: True)(None)
+        actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)() and getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
         if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed:
             if input_enabled:
                 action = None
