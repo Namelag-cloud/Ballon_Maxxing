@@ -33,6 +33,9 @@ class SeededRNG:
     def rayleigh(self, scale: float = 1.0) -> float:
         return float(self._rng.rayleigh(scale))
 
+    def exponential(self, scale: float = 1.0) -> float:
+        return float(self._rng.exponential(scale))
+
 
 def sample_lognormal_bounded(
     rng: SeededRNG,
