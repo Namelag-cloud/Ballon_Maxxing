@@ -131,15 +131,41 @@ class BalloonExecutor:
         actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
         if self._diagnostic:
             self._diagnostic.log("executor_gate", idle_gap_open=now >= self._idle_until, idle_until=self._idle_until, primary_idle=self._primary_scheduler.is_idle, twin_idle=self._twin_scheduler.is_idle, actions_allowed=actions_allowed, input_enabled=input_enabled)
+        if self._diagnostic and (actions or notifications or multicolor_specials) and not (now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed):
+            reasons = []
+            if now < self._idle_until:
+                reasons.append("idle_gap")
+            if not self._twin_scheduler.is_idle:
+                reasons.append("twin_scheduler_busy")
+            if not self._primary_scheduler.is_idle:
+                reasons.append("primary_scheduler_busy")
+            if not actions_allowed:
+                reasons.append("behavioral_start_gate")
+            if not input_enabled:
+                reasons.append("input_disabled")
+            self._diagnostic.log("action_start_attempt", lane="primary_or_twin", target=None, accepted=False, reason=reasons)
         if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed:
             if input_enabled:
                 action = None
+                gemini_gate_result = None
+                notification_gate_result = None
                 if notifications and multicolor_specials:
                     action = multicolor_specials[0]
-                elif notifications and getattr(self._behavior, "should_click_notification", lambda: False)():
-                    action = notifications[0]
-                elif multicolor_specials and getattr(self._behavior, "should_select_gemini_without_notification", lambda: False)():
-                    action = multicolor_specials[0]
+                    gemini_gate_result = True
+                    if self._diagnostic:
+                        self._diagnostic.log("gemini_gate", candidate_count=len(multicolor_specials), notification_count=len(notifications), selected=True, reason="notification_present")
+                elif notifications:
+                    notification_gate_result = getattr(self._behavior, "should_click_notification", lambda: False)()
+                    if notification_gate_result:
+                        action = notifications[0]
+                    if self._diagnostic:
+                        self._diagnostic.log("notification_gate", candidate_count=len(notifications), selected=notification_gate_result, reason="behavioral_notification_gate")
+                elif multicolor_specials:
+                    gemini_gate_result = getattr(self._behavior, "should_select_gemini_without_notification", lambda: False)()
+                    if gemini_gate_result:
+                        action = multicolor_specials[0]
+                    if self._diagnostic:
+                        self._diagnostic.log("gemini_gate", candidate_count=len(multicolor_specials), notification_count=0, selected=gemini_gate_result, reason="behavioral_gemini_without_notification_probability")
                 elif actions:
                     action = actions[0]
                 if isinstance(action, BalloonAction) and action.target_type.value == "special_sequence_balloon":
