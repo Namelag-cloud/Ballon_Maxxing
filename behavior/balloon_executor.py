@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import time
 from typing import Optional, Protocol
 
 from behavior.action_scheduler import ActionScheduler, ActionTimestamps, TwinActionCompletion, TwinActionScheduler
@@ -52,6 +53,11 @@ class BalloonExecutor:
         self._g_should_execute = True
         self._special_fail_target_id = None
         self._special_should_execute = True
+        self._last_behavior_plan_ms = 0.0
+
+    @property
+    def last_behavior_plan_ms(self) -> float:
+        return self._last_behavior_plan_ms
 
     @property
     def primary_scheduler(self) -> ActionScheduler:
@@ -74,6 +80,7 @@ class BalloonExecutor:
 
     def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=(), multicolor_specials=(), duration_s=None) -> BalloonExecutionResult:
         now = self._clock()
+        self._last_behavior_plan_ms = 0.0
         self._g_visible = g_action is not None
         if self._diagnostic:
             self._diagnostic.log("executor_frame", now=now, actions=[self._action_info(a) for a in actions], g_action=self._action_info(g_action), notifications=[self._action_info(a) for a in notifications], multicolor_specials=[self._action_info(a) for a in multicolor_specials], input_enabled=input_enabled, active_primary=self._active_info(self._primary_scheduler.active_action), active_twin=self._active_twin_info(), active_g=self._active_info(self._g_scheduler.active_action), idle_until=self._idle_until)
@@ -394,7 +401,8 @@ class BalloonExecutor:
     def _plan(self, action: BalloonAction, target_x: int, target_y: int) -> BehavioralAction:
         metadata = dict(action.metadata or {})
         metadata["is_twin"] = action.is_twin
-        return self._behavior.plan_action(
+        t0 = time.perf_counter_ns()
+        result = self._behavior.plan_action(
             current_x=float(self._current_mouse[0]),
             current_y=float(self._current_mouse[1]),
             target_x=float(target_x),
@@ -403,6 +411,8 @@ class BalloonExecutor:
             target_metadata=metadata,
             acquisition_timestamp=metadata.get("first_seen_timestamp"),
         )
+        self._last_behavior_plan_ms += (time.perf_counter_ns() - t0) / 1e6
+        return result
 
     @staticmethod
     def _behavioral_endpoint(action: BehavioralAction) -> tuple[float, float]:
