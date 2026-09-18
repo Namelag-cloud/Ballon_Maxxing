@@ -368,10 +368,6 @@ class BalloonGameProfile(GameProfile):
             enclosed_hole_area = 0.0
             if hierarchy is not None:
                 for contour_index, contour_info in enumerate(hierarchy[0]):
-                    if contour_info[3] == contour_list.index(
-                        max(contour_list, key=cv2.contourArea)
-                    ):
-                        continue
                     if contour_info[3] >= 0:
                         enclosed_hole_area += cv2.contourArea(contour_list[contour_index])
             hole_ratio = enclosed_hole_area / float(w * h) if w * h else 0.0
