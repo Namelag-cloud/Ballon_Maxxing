@@ -82,6 +82,14 @@ class InputConfig:
 
 
 @dataclass
+class FeedbackConfig:
+    combo_roi: tuple[int, int, int, int] | None = None
+    score_roi: tuple[int, int, int, int] | None = None
+    pop_roi: tuple[int, int, int, int] | None = None
+    change_threshold: float = 0.08
+
+
+@dataclass
 class DebugConfig:
     show_detections: bool = True
     show_bounding_boxes: bool = True
@@ -102,6 +110,7 @@ class Settings:
     grouping: GroupingConfig = field(default_factory=GroupingConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
     input: InputConfig = field(default_factory=InputConfig)
+    feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
 
@@ -142,6 +151,9 @@ class Settings:
         input_data = data.get("input", {})
         inp = InputConfig(**input_data)
 
+        feedback_data = data.get("feedback", {})
+        feedback = FeedbackConfig(**feedback_data) if feedback_data else FeedbackConfig()
+
         debug_data = data.get("debug", {})
         debug = DebugConfig(**debug_data)
 
@@ -158,6 +170,7 @@ class Settings:
             grouping=grouping,
             rules=rules,
             input=inp,
+            feedback=feedback,
             debug=debug,
             behavior=behavior,
         )

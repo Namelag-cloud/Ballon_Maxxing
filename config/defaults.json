@@ -45,6 +45,12 @@
     "enabled": true,
     "click_delay_ms": 0
   },
+  "feedback": {
+    "combo_roi": null,
+    "score_roi": null,
+    "pop_roi": null,
+    "change_threshold": 0.08
+  },
   "debug": {
     "show_detections": true,
     "show_bounding_boxes": true,
@@ -54,13 +60,13 @@
     "show_track_ids": true
   },
   "behavior": {
-    "enabled": false,
-    "seed": 12345,
+    "enabled": true,
+    "seed": null,
     "reaction_time": {
       "distribution": "lognormal",
-      "median_ms": 300,
-      "sigma": 0.45,
-      "minimum_ms": 150,
+      "median_ms": 333.32,
+      "sigma": 0.35,
+      "minimum_ms": 149.994,
       "maximum_ms": 2500
     },
     "movement": {
@@ -89,8 +95,8 @@
       "maximum_ms": 250
     },
     "errors": {
-      "enabled": false,
-      "miss_probability": 0.005,
+      "enabled": true,
+      "miss_probability": 0.035,
       "delayed_response_probability": 0.02,
       "extra_pause_probability": 0.01,
       "extra_pause_min_ms": 200,
@@ -116,7 +122,48 @@
     "endpoint_error": {
       "enabled": true,
       "scale_px": 5.0,
-      "max_px": 12.0
+      "max_px": 12.0,
+      "spatial_sigma_pct": 0.16
+    },
+    "human_profile": {
+      "enabled": true,
+      "reaction_mu_ticks_min": 12.0,
+      "reaction_mu_ticks_max": 32.0,
+      "spatial_sigma_pct_min": 0.10,
+      "spatial_sigma_pct_max": 0.22,
+      "miss_rate_min": 0.02,
+      "miss_rate_max": 0.05,
+      "notif_hit_rate_min": 0.005,
+      "notif_hit_rate_max": 0.02,
+      "duo_delta_min_ms": 50.0,
+      "duo_delta_max_ms": 500.0,
+      "duo_delta_median_ms": 150.0,
+      "super_g_fail_rate_min": 0.08,
+      "super_g_fail_rate_max": 0.22,
+      "balloon_g_abandon_rate_min": 0.05,
+      "balloon_g_abandon_rate_max": 0.15,
+      "idle_lambda_min": 0.03,
+      "idle_lambda_max": 0.08,
+      "start_delay_min_s": 1.0,
+      "start_delay_max_s": 3.0,
+      "warmup_min_s": 15.0,
+      "warmup_max_s": 25.0,
+      "fatigue_min_ticks_per_min": 0.5,
+      "fatigue_max_ticks_per_min": 2.0,
+      "early_exit_prob_min": 0.05,
+      "early_exit_prob_max": 0.15,
+      "early_exit_ratio_min": 0.80,
+      "early_exit_ratio_max": 0.95,
+      "reaction_sigma": 0.35,
+      "reaction_ar1": 0.30,
+      "perception_min_ticks": 2.0,
+      "perception_max_ticks": 5.0,
+      "duo_delta_sigma": 0.4,
+      "duo_y_variance_multiplier": 1.5,
+      "fat_finger_probability": 0.02,
+      "fat_finger_multiplier": 2.0,
+      "gemini_without_notification_probability": 0.01,
+      "final_activity_cutoff_s": 1.5
     }
   }
 }

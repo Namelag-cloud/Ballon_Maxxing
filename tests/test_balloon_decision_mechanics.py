@@ -155,7 +155,7 @@ class TestBalloonDecisionMechanics(unittest.TestCase):
             {target.target_id for target in twin.targets},
             {20, 21},
         )
-        self.assertLessEqual(twin.max_click_delta_ms, 30.0)
+        self.assertLessEqual(twin.max_click_delta_ms, 500.0)
         self.assertEqual(result.actions[1].target_id, 30)
 
     def test_unpaired_twin_is_not_clicked_as_a_normal_balloon(self):

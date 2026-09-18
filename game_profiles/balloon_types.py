@@ -11,6 +11,7 @@ class TargetType(Enum):
     SPECIAL_SEQUENCE_BALLOON = "special_sequence_balloon"
     G_SYMBOL = "g_symbol"
     MULTICOLOR_SPECIAL = "multicolor_special"
+    NOTIFICATION = "notification"
     INVALID_WHITE = "invalid_white"
 
 
@@ -36,8 +37,6 @@ class SpecialSequenceStep(Enum):
 
 @dataclass(frozen=True)
 class VisualFeatures:
-    """Measured image features retained for classification/debugging."""
-
     circularity: float = 0.0
     solidity: float = 0.0
     white_border_ratio: float = 0.0
@@ -49,8 +48,7 @@ class VisualFeatures:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "circularity": self.circularity,
-            "solidity": self.solidity,
+            "circularity": self.circularity, "solidity": self.solidity,
             "white_border_ratio": self.white_border_ratio,
             "outline_contrast": self.outline_contrast,
             "ring_detected": self.ring_detected,
@@ -62,8 +60,6 @@ class VisualFeatures:
 
 @dataclass(frozen=True)
 class TargetDetection:
-    """Vision-layer description of one visible game object."""
-
     target_type: TargetType
     color: BalloonColor | None
     center: tuple[int, int]
@@ -80,13 +76,9 @@ class TargetDetection:
         return {
             "target_type": self.target_type.value,
             "color_name": self.color.value if self.color else None,
-            "center": self.center,
-            "bbox": self.bbox,
-            "area": self.area,
-            "color_confidence": self.confidence,
-            "confidence": self.confidence,
-            "width": self.width,
-            "height": self.height,
+            "center": self.center, "bbox": self.bbox, "area": self.area,
+            "color_confidence": self.confidence, "confidence": self.confidence,
+            "width": self.width, "height": self.height,
             "is_twin": self.is_twin,
             "is_special_sequence": self.is_special_sequence,
             "has_outline": self.visual_features.white_border_ratio >= 0.10,
@@ -98,17 +90,13 @@ class TargetDetection:
 
 @dataclass(frozen=True)
 class TwinAction:
-    """One logical action coordinating the two twin balloon clicks."""
-
     targets: tuple["BalloonAction", "BalloonAction"]
-    max_click_delta_ms: float = 30.0
+    max_click_delta_ms: float = 500.0
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class BalloonAction:
-    """Decision-layer action contract; execution details belong to behavior."""
-
     target_id: int | None
     target_type: TargetType
     color: BalloonColor | None
@@ -122,8 +110,6 @@ class BalloonAction:
 
 @dataclass
 class BalloonGameState:
-    """Minimal persistent decision state for later phases."""
-
     mode: GameMode = GameMode.NORMAL_PLAY
     special_step: SpecialSequenceStep = SpecialSequenceStep.COMPLETE
     special_sequence_seen: bool = False

@@ -5,7 +5,7 @@ import time
 from ctypes import wintypes
 
 from input.base import InputBackend
-from input.coordinates import VirtualScreen, screen_to_sendinput, diagnose
+from input.coordinates import VirtualScreen, screen_to_sendinput
 
 user32 = ctypes.windll.user32
 
@@ -18,22 +18,16 @@ MOUSEEVENTF_ABSOLUTE = 0x8000
 
 class MOUSEINPUT(ctypes.Structure):
     _fields_ = [
-        ("dx", ctypes.c_long),
-        ("dy", ctypes.c_long),
-        ("mouseData", ctypes.c_ulong),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("dx", ctypes.c_long), ("dy", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong), ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
     ]
 
 
 class INPUT(ctypes.Structure):
     class _INPUT_UNION(ctypes.Union):
         _fields_ = [("mi", MOUSEINPUT)]
-    _fields_ = [
-        ("type", ctypes.c_ulong),
-        ("union", _INPUT_UNION),
-    ]
+    _fields_ = [("type", ctypes.c_ulong), ("union", _INPUT_UNION)]
 
 
 def _make_input(dx: int, dy: int, flags: int) -> INPUT:
@@ -51,88 +45,70 @@ class SendInputBackend(InputBackend):
     def __init__(self, debug_logging: bool = False) -> None:
         self._virtual = VirtualScreen()
         self._debug_logging = debug_logging
-        self._last_x: int = self._virtual.left + self._virtual.width // 2
-        self._last_y: int = self._virtual.top + self._virtual.height // 2
+        self._last_x = self._virtual.left + self._virtual.width // 2
+        self._last_y = self._virtual.top + self._virtual.height // 2
 
     @property
     def virtual_screen(self) -> VirtualScreen:
         return self._virtual
 
     def click_screen(self, screen_x: int, screen_y: int) -> float:
-        norm_x, norm_y = screen_to_sendinput(
-            screen_x, screen_y,
-            self._virtual.left, self._virtual.top,
-            self._virtual.width, self._virtual.height,
-        )
-
-        move = _make_input(norm_x, norm_y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)
-        down = _make_input(0, 0, MOUSEEVENTF_LEFTDOWN)
-        up = _make_input(0, 0, MOUSEEVENTF_LEFTUP)
-
-        inputs = (INPUT * 3)(move, down, up)
-        sent = user32.SendInput(3, ctypes.byref(inputs), ctypes.sizeof(INPUT))
-        if sent != 3:
-            pass
-
-        return time.perf_counter_ns() / 1e9
+        move_ts = self.move_to(screen_x, screen_y)
+        down_ts = self.left_down()
+        up_ts = self.left_up()
+        return up_ts
 
     def move_to(self, screen_x: int, screen_y: int) -> float:
         norm_x, norm_y = screen_to_sendinput(
-            screen_x, screen_y,
-            self._virtual.left, self._virtual.top,
+            screen_x, screen_y, self._virtual.left, self._virtual.top,
             self._virtual.width, self._virtual.height,
         )
         move = _make_input(norm_x, norm_y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)
         inputs = (INPUT * 1)(move)
-        user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        sent = user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        if sent != 1:
+            raise RuntimeError(f"SendInput move dispatch incomplete: sent {sent}/1")
+        self._last_x, self._last_y = int(screen_x), int(screen_y)
         return time.perf_counter_ns() / 1e9
 
     def left_down(self) -> float:
         down = _make_input(0, 0, MOUSEEVENTF_LEFTDOWN)
         inputs = (INPUT * 1)(down)
-        user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        sent = user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        if sent != 1:
+            raise RuntimeError(f"SendInput left-down dispatch incomplete: sent {sent}/1")
         return time.perf_counter_ns() / 1e9
 
     def left_up(self) -> float:
         up = _make_input(0, 0, MOUSEEVENTF_LEFTUP)
         inputs = (INPUT * 1)(up)
-        user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        sent = user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        if sent != 1:
+            raise RuntimeError(f"SendInput left-up dispatch incomplete: sent {sent}/1")
         return time.perf_counter_ns() / 1e9
 
     def click_pair(
         self,
         first: tuple[int, int],
         second: tuple[int, int],
+        inter_click_delay_s: float = 0.0,
     ) -> tuple[float, float, float, float]:
-        """Dispatch two complete clicks in one SendInput batch.
+        """Dispatch two complete clicks as individual OS operations.
 
-        The returned timestamps are the authoritative dispatch timestamps used
-        by the twin scheduler to enforce the <=30 ms mouse-down contract.
+        Unlike the old six-event batch, each click has independently measured
+        move/down/up timestamps. This makes the inter-click interval observable.
         """
-        inputs_list = []
-        for screen_x, screen_y in (first, second):
-            norm_x, norm_y = screen_to_sendinput(
-                screen_x, screen_y,
-                self._virtual.left, self._virtual.top,
-                self._virtual.width, self._virtual.height,
-            )
-            inputs_list.extend([
-                _make_input(norm_x, norm_y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE),
-                _make_input(0, 0, MOUSEEVENTF_LEFTDOWN),
-                _make_input(0, 0, MOUSEEVENTF_LEFTUP),
-            ])
+        self.move_to(*first)
+        first_down = self.left_down()
+        first_up = self.left_up()
 
-        inputs = (INPUT * len(inputs_list))(*inputs_list)
-        sent = user32.SendInput(
-            len(inputs_list), ctypes.byref(inputs), ctypes.sizeof(INPUT)
-        )
-        if sent != len(inputs_list):
-            raise RuntimeError(
-                f"SendInput pair dispatch incomplete: sent {sent}/{len(inputs_list)} events"
-            )
+        if inter_click_delay_s > 0:
+            time.sleep(inter_click_delay_s)
 
-        timestamp = time.perf_counter_ns() / 1e9
-        return timestamp, timestamp, timestamp, timestamp
+        self.move_to(*second)
+        second_down = self.left_down()
+        second_up = self.left_up()
+        return first_down, first_up, second_down, second_up
 
     def click(self, x: int, y: int) -> float:
         return self.click_screen(x, y)
