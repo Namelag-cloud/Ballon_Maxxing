@@ -138,7 +138,7 @@ class BehavioralModel:
         # Exponential waiting time, with no forced idle on every action.
         if self._rng.random() > min(1.0, self._profile.idle_lambda):
             return 0.0
-        return float(self._rng._rng.exponential(1.0 / self._profile.idle_lambda))
+        return self._rng.exponential(1.0 / self._profile.idle_lambda)
 
     def sample_duo_delta_s(self) -> float:
         raw = self._rng.lognormal(math.log(self._profile.duo_delta_mu_ms), self._profile.duo_delta_sigma)
