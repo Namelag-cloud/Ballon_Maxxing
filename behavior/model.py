@@ -140,7 +140,11 @@ class BehavioralModel:
         return self._early_exit_selected and self.session_elapsed_s() >= duration_s * self._profile.early_exit_ratio
 
     def should_start_new_action(self, duration_s: float | None) -> bool:
-        if duration_s is None or duration_s <= 0 or not self._session_started:
+        if not self._session_started:
+            return False
+        if not self.actions_ready():
+            return False
+        if duration_s is None or duration_s <= 0:
             return True
         return self.session_elapsed_s() < max(0.0, duration_s - self._activity_cutoff_s)
 
