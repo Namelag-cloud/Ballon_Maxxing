@@ -54,7 +54,7 @@ class BalloonDecisionEngine:
         if notifications:
             executable_specials = multicolor
             for action in executable_specials:
-                action.metadata["notification_count"] = len(notifications) if False else 0
+                action.metadata["notification_count"] = len(notifications)
 
         special = [
             d for d in visible
