@@ -230,6 +230,7 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         self.assertEqual(self.executor.latest_g.position, (80, 90))
 
         self.executor.tick([], g2, self.input, 0, 0, True)
+        self.executor.tick([], g2, self.input, 0, 0, True)
         result = self.executor.tick([], g2, self.input, 0, 0, True)
         self.assertTrue(result.g_click_completed)
         self.assertEqual(self.input.moves[-1][1:], (80, 90))
