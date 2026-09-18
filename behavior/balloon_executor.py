@@ -112,23 +112,22 @@ class BalloonExecutor:
 
         actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)() and getattr(self._behavior, "should_start_new_action", lambda _duration: True)(None)
         if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed:
-            if input_enabled and notifications and getattr(self._behavior, "should_click_notification", lambda: False)():
-                action = notifications[0]
-                self._start_single(self._primary_scheduler, action, region_left, region_top)
-                self._active_primary = action
-            elif input_enabled:
-                candidate_actions = tuple(actions)
-                if not notifications and multicolor_specials and getattr(self._behavior, "should_select_gemini_without_notification", lambda: False)():
-                    candidate_actions = candidate_actions + (multicolor_specials[0],)
-                if not candidate_actions:
-                    candidate_actions = ()
-                if candidate_actions:
-                    action = candidate_actions[0]
-                if isinstance(action, TwinAction):
-                    self._start_twin(action, region_left, region_top)
-                else:
-                    self._start_single(self._primary_scheduler, action, region_left, region_top)
-                self._active_primary = action
+            if input_enabled:
+                action = None
+                if notifications and multicolor_specials:
+                    action = multicolor_specials[0]
+                elif notifications and getattr(self._behavior, "should_click_notification", lambda: False)():
+                    action = notifications[0]
+                elif multicolor_specials and getattr(self._behavior, "should_select_gemini_without_notification", lambda: False)():
+                    action = multicolor_specials[0]
+                elif actions:
+                    action = actions[0]
+                if action is not None:
+                    if isinstance(action, TwinAction):
+                        self._start_twin(action, region_left, region_top)
+                    else:
+                        self._start_single(self._primary_scheduler, action, region_left, region_top)
+                    self._active_primary = action
 
         twin_completion = self._twin_scheduler.tick(input_backend)
         if twin_completion is not None:
