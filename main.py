@@ -439,39 +439,7 @@ class Application:
                     clicks_sent=0,
                     behavioral=self._telemetry.behavioral.extract(len(tracks)),
                 )
-                telemetry_t0 = now_monotonic()
                 self._telemetry.log_frame(telem)
-                telemetry_ms = (now_monotonic() - telemetry_t0) * 1000.0
-
-                gui_t0 = now_monotonic()
-                vis = self._visualizer.render(
-                    frame, detections, tracks, actions,
-                    input_enabled=self._input_enabled, fps=self._current_fps,
-                )
-                gui_render_ms = (now_monotonic() - gui_t0) * 1000.0
-                gui_show_t0 = now_monotonic()
-                key = self._visualizer.show(vis)
-                gui_show_ms = (now_monotonic() - gui_show_t0) * 1000.0
-                if self._diagnostic:
-                    self._diagnostic.log(
-                        "frame_timing",
-                        capture_ms=self._capture.last_timing_ms.get("capture", 0.0),
-                        numpy_ms=self._capture.last_timing_ms.get("numpy", 0.0),
-                        feedback_ms=self._last_frame_stage_timings.get("feedback_ms", 0.0),
-                        vision_ms=self._last_frame_stage_timings.get("vision_ms", 0.0),
-                        tracking_ms=self._last_frame_stage_timings.get("tracking_ms", 0.0),
-                        decision_ms=self._last_frame_stage_timings.get("decision_ms", 0.0),
-                        behavior_ms=getattr(self._balloon_executor, "last_behavior_plan_ms", 0.0),
-                        executor_ms=locals().get("executor_ms", 0.0),
-                        telemetry_ms=telemetry_ms,
-                        gui_render_ms=gui_render_ms,
-                        gui_show_ms=gui_show_ms,
-                        diagnostic_ms=self._diagnostic.frame_log_duration_ms,
-                        frame_total_ms=(now_monotonic() - t_start) * 1000.0,
-                    )
-                if key == 27:
-                    self._running = False
-                    break
 
                 if self._frame_count % 60 == 0:
                     print(
