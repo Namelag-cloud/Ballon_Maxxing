@@ -45,6 +45,7 @@ class BehavioralAction:
     perception_ticks: float = 0.0
     planned_at: float = 0.0
     acquisition_timestamp: float | None = None
+    scheduler_delay_s: float = 0.0
 
 
 class BehavioralModel:
@@ -96,6 +97,8 @@ class BehavioralModel:
         self._session_start = 0.0
         self._last_reaction_ticks = self._profile.reaction_mu_ticks
         self._sampled_start_delay_s = self._profile.start_delay_sec
+        self._early_exit_selected = False
+        self._activity_cutoff_s = 1.5
 
     @property
     def config(self) -> BehaviorConfig:
@@ -121,6 +124,7 @@ class BehavioralModel:
         self._session.start_session()
         self._session_started = True
         self._session_start = time.perf_counter()
+        self._early_exit_selected = self._rng.random() < self._profile.early_exit_prob
 
     def session_elapsed_s(self) -> float:
         return max(0.0, time.perf_counter() - self._session_start) if self._session_started else 0.0
@@ -128,9 +132,18 @@ class BehavioralModel:
     def should_early_exit(self, duration_s: float | None) -> bool:
         if duration_s is None or duration_s <= 0 or not self._session_started:
             return False
-        if self.session_elapsed_s() < duration_s * self._profile.early_exit_ratio:
-            return False
-        return self._rng.random() < self._profile.early_exit_prob / 60.0
+        return self._early_exit_selected and self.session_elapsed_s() >= duration_s * self._profile.early_exit_ratio
+
+    def should_start_new_action(self, duration_s: float | None) -> bool:
+        if duration_s is None or duration_s <= 0 or not self._session_started:
+            return True
+        return self.session_elapsed_s() < max(0.0, duration_s - self._activity_cutoff_s)
+
+    def actions_ready(self) -> bool:
+        return self.session_elapsed_s() >= self._sampled_start_delay_s
+
+    def activity_cutoff_s(self) -> float:
+        return self._activity_cutoff_s
 
     def should_click_notification(self) -> bool:
         return self._rng.random() < self._profile.notif_hit_rate
@@ -207,16 +220,15 @@ class BehavioralModel:
         base = self._profile.reaction_mu_ticks
         sample = self._rng.lognormal(math.log(max(1.0, base)), self._profile.reaction_sigma)
         correlated = self._profile.reaction_ar1 * self._last_reaction_ticks + (1.0 - self._profile.reaction_ar1) * sample
-        intended_ticks = max(9.0, correlated + self._profile.perception_ticks)
+        intended_ticks = max(9.0, correlated)
         if is_delayed:
             intended_ticks += self._rng.uniform(12.0, 48.0)
         intended_ticks *= (1.0 + modifier)
         self._last_reaction_ticks = intended_ticks
-        # The target was already observed before plan_action(). Only the
-        # post-acquisition reaction portion is scheduled; the perception
-        # component remains part of the measured acquisition-to-click interval.
-        scheduled_reaction_ticks = max(0.0, intended_ticks - self._profile.perception_ticks)
-        reaction_s = scheduled_reaction_ticks * ENGINE_TICK_MS / 1000.0
+        # Perception is a modeled component of the intended acquisition-to-click
+        # interval. Do not subtract it from the scheduled delay: doing so makes
+        # the observed interval systematically shorter than the intended one.
+        reaction_s = intended_ticks * ENGINE_TICK_MS / 1000.0
 
         raw_movement = sample_fitts_mt(
             self._rng, distance, max(1.0, target_width),
@@ -277,6 +289,7 @@ class BehavioralModel:
             perception_ticks=self._profile.perception_ticks,
             planned_at=planned_at,
             acquisition_timestamp=acquisition_timestamp,
+            scheduler_delay_s=0.0,
         )
 
     def wait_reaction(self, action: BehavioralAction) -> None:
