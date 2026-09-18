@@ -212,6 +212,7 @@ class BalloonExecutor:
             planned_dispatch_ts=behavioral_action.planned_at,
             dispatch_ts=timestamps.click_down or timestamps.click_up,
             estimated_reaction_ticks=observed_reaction,
+            timing_error_ms=((observed_reaction - behavioral_action.intended_reaction_ticks) * (1000.0 / 60.0)) if observed_reaction is not None else None,
             screen_click_x=int(screen_x),
             screen_click_y=int(screen_y),
             endpoint_error_px=behavioral_action.endpoint_error_px,
