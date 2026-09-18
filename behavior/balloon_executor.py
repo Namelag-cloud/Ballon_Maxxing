@@ -8,6 +8,7 @@ from behavior.model import BehavioralAction, BehavioralModel
 from game_profiles.balloon_types import BalloonAction, TwinAction
 from input.coordinates import frame_to_screen
 from telemetry.outcome import SessionOutcome
+from telemetry.timing import now_monotonic
 
 
 class PairInputBackend(Protocol):
@@ -35,6 +36,7 @@ class BalloonExecutor:
     """Execute visible decisions through the stochastic behavioral model."""
 
     def __init__(self, behavior: BehavioralModel, clock=None, initial_mouse_position=(0, 0)) -> None:
+        self._clock = clock or now_monotonic
         self._behavior = behavior
         self._primary_scheduler = ActionScheduler(clock=clock)
         self._twin_scheduler = TwinActionScheduler(clock=clock)
