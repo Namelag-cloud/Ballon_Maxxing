@@ -90,7 +90,8 @@ class EndpointErrorConfig:
     scale_px: float = 5.0
     max_px: float = 12.0
     spatial_sigma_pct: float = 0.16
-    fat_finger_sigma_pct: float = 0.025
+    fat_finger_probability: float = 0.02
+    fat_finger_multiplier: float = 2.0
 
 
 @dataclass
@@ -106,6 +107,7 @@ class HumanProfileConfig:
     notif_hit_rate_max: float = 0.02
     duo_delta_min_ms: float = 50.0
     duo_delta_max_ms: float = 500.0
+    duo_y_variance_multiplier: float = 1.5
     duo_delta_median_ms: float = 150.0
     super_g_fail_rate_min: float = 0.08
     super_g_fail_rate_max: float = 0.22
