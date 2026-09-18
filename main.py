@@ -457,14 +457,15 @@ class Application:
                 region = self._settings.capture.region
 
                 if self._balloon_executor and self._balloon_frame_decision is not None:
+                    new_actions_allowed = not self._behavior or self._behavior.should_start_new_action(self._duration)
                     execution = self._balloon_executor.tick(
-                        self._balloon_frame_decision.actions,
-                        self._balloon_frame_decision.g_action,
+                        self._balloon_frame_decision.actions if new_actions_allowed else (),
+                        self._balloon_frame_decision.g_action if new_actions_allowed else None,
                         self._input_backend,
                         region.left,
                         region.top,
                         self._input_enabled,
-                        self._balloon_frame_decision.notifications,
+                        self._balloon_frame_decision.notifications if new_actions_allowed else (),
                     )
                     clicks_this_frame = execution.clicks_sent
                     if execution.input_timestamp is not None:
