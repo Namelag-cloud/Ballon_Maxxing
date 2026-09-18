@@ -17,7 +17,7 @@ class ValidationResult:
     malformed_interactions: int
     non_monotonic_ticks: int
     non_finite_coordinates: int
-    duo_window_violations: int
+    duo_window_violations: int | None
     authoritative_replay: str = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
 
     def as_dict(self) -> dict:
@@ -45,12 +45,9 @@ def validate_interactions(interactions: list[dict]) -> ValidationResult:
         if not math.isfinite(float(x)) or not math.isfinite(float(y)):
             non_finite += 1
 
-    # Without per-click object IDs/types, pair classification is not
-    # authoritative. This checks only a conservative consecutive-click window.
-    duo_violations = 0
-    for a, b in zip(ticks, ticks[1:]):
-        if b - a > DUO_WINDOW_TICKS:
-            continue
+    # The submitted interaction stream does not identify Duo members, so a
+    # click pair cannot be established from this payload alone.
+    duo_violations = None
 
     return ValidationResult(
         valid_structure=not (malformed or non_monotonic or non_finite),
