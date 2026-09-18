@@ -41,9 +41,9 @@ def load_rows(paths):
         if path.suffix.lower() == ".json":
             data = json.loads(path.read_text())
             duration = data.get("session", {}).get("duration_s")
-            for outcome in data.get("outcomes", []):
+            for index, outcome in enumerate(data.get("outcomes", [])):
                 row = dict(outcome)
-                if duration is not None:
+                if duration is not None and index == 0:
                     row["_session_duration_s"] = duration
                 rows.append(row)
         else:
@@ -95,10 +95,15 @@ def lag1_autocorrelation(values):
 def summarize(rows):
     reaction = values(rows, "estimated_acquisition_click_ticks")
     spatial = values(rows, "endpoint_error_px")
-    radii = values(rows, "target_radius_px")
-    normalized_spatial = [
-        error / radius for error, radius in zip(spatial, radii) if radius > 0
-    ]
+    normalized_spatial = []
+    for row in rows:
+        try:
+            error = float(row.get("endpoint_error_px"))
+            radius = float(row.get("target_radius_px"))
+            if radius > 0:
+                normalized_spatial.append(error / radius)
+        except (TypeError, ValueError):
+            continue
     duo = values(rows, "duo_delta_ms")
     timing_error = values(rows, "intended_vs_observed_timing_error_ms")
     durations = values(rows, "_session_duration_s")
