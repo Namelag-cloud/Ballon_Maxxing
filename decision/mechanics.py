@@ -79,7 +79,7 @@ class BalloonDecisionEngine:
         return DecisionResult(
             actions=tuple(actions),
             g_action=g_action,
-            multicolor_specials=tuple(executable_specials),
+            multicolor_specials=tuple(multicolor),
             notifications=notification_actions,
             mode=self.state.mode,
             special_step=self.state.special_step,
