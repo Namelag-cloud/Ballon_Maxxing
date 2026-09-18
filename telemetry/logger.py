@@ -11,6 +11,7 @@ import numpy as np
 
 from telemetry.timing import now_monotonic
 from telemetry.behavioral import BehavioralExtractor, BehavioralFeatures
+from telemetry.outcome import SessionOutcome
 
 
 @dataclass
@@ -37,6 +38,8 @@ class TelemetryLogger:
         self._behavioral = BehavioralExtractor()
         self._frame_counter: int = 0
         self._total_clicks: int = 0
+        self._outcomes: list[SessionOutcome] = []
+        self._session_metadata: dict = {}
 
         ts = int(time.time())
         self._csv_path = self._output_dir / f"frames_{ts}.csv"
@@ -83,6 +86,12 @@ class TelemetryLogger:
     def record_click(self, **kwargs) -> None:
         self._total_clicks += 1
         self._behavioral.record_click(**kwargs)
+
+    def set_session_metadata(self, **metadata) -> None:
+        self._session_metadata.update(metadata)
+
+    def record_outcome(self, outcome: SessionOutcome) -> None:
+        self._outcomes.append(outcome)
 
     def summary(self) -> dict:
         if not self._frames:
@@ -142,6 +151,9 @@ class TelemetryLogger:
             "avg_detections_per_frame": float(np.mean(detect_counts)),
             "action_timing": action_stats,
             "behavioral": asdict(self._behavioral.extract(len(detect_counts))),
+            "session": self._session_metadata,
+            "outcomes_count": len(self._outcomes),
+            "outcomes": [o.as_dict() for o in self._outcomes],
         }
 
     def save(self) -> None:
