@@ -170,6 +170,7 @@ class Application:
         self._fps_counter_start = now_monotonic()
         self._fps_frame_count = 0
         self._current_fps = 0.0
+        self._last_frame_stage_timings = {}
 
     def _setup_hotkeys(self) -> None:
         HK_RSHIFT = 0xA1
@@ -205,12 +206,18 @@ class Application:
         user32.UnhookWindowsHookEx(hook)
 
     def _process_frame(self, frame: np.ndarray):
-        self._last_feedback = self._feedback_reader.observe(frame, now_monotonic())
+        t0 = now_monotonic()
+        self._last_feedback = self._feedback_reader.observe(frame, t0)
+        feedback_ms = (now_monotonic() - t0) * 1000.0
         if self._game_profile is not None:
+            t0 = now_monotonic()
             detections = self._game_profile.detect(frame)
+            vision_ms = (now_monotonic() - t0) * 1000.0
             if self._balloon_decision is not None:
+                t0 = now_monotonic()
                 tracking_detections = self._game_profile.to_tracking_detections(detections)
                 tracks = self._tracker.update(tracking_detections)
+                tracking_ms = (now_monotonic() - t0) * 1000.0
                 current_detections = []
                 for track in tracks.values():
                     if track.frames_missing != 0:
@@ -228,8 +235,16 @@ class Application:
                     })
                     current_detections.append(observed)
 
+                t0 = now_monotonic()
                 decision = self._balloon_decision.decide(current_detections)
+                decision_ms = (now_monotonic() - t0) * 1000.0
                 self._balloon_frame_decision = decision
+                self._last_frame_stage_timings = {
+                    "feedback_ms": feedback_ms,
+                    "vision_ms": vision_ms,
+                    "tracking_ms": tracking_ms,
+                    "decision_ms": decision_ms,
+                }
                 if self._diagnostic:
                     self._diagnostic.log("tracking_decision", frame_id=self._frame_count + 1, detections=[{"type": d.get("target_type"), "id": d.get("target_id"), "color": d.get("color_name"), "center": d.get("center")} for d in current_detections], detection_counts=self._count_types(current_detections), actionable=[self._action_info_for_diag(a) for a in decision.actions], actionable_counts=self._count_types_from_actions(decision.actions), g_action=self._action_info_for_diag(decision.g_action), multicolor_specials=[self._action_info_for_diag(a) for a in decision.multicolor_specials], notifications=[self._action_info_for_diag(a) for a in decision.notifications], mode=decision.mode.value, special_step=decision.special_step.value)
 
@@ -240,7 +255,14 @@ class Application:
                     game_actions.extend(_balloon_action_to_game_actions(action))
                 return detections, tracks, click_actions, game_actions
 
+            t0 = now_monotonic()
             game_actions = self._game_profile.select_targets(detections, frame.shape)
+            self._last_frame_stage_timings = {
+                "feedback_ms": feedback_ms,
+                "vision_ms": vision_ms,
+                "tracking_ms": 0.0,
+                "decision_ms": (now_monotonic() - t0) * 1000.0,
+            }
             click_actions = [_game_action_to_click_action(a) for a in game_actions]
             tracks_dict = {}
             for i, det in enumerate(detections):
@@ -248,9 +270,21 @@ class Application:
                 tracks_dict[track.id] = track
             return detections, tracks_dict, click_actions, game_actions
         else:
-            detections, vision_ms = self._vision.process(frame)
+            t0 = now_monotonic()
+            detections, _vision_internal_ms = self._vision.process(frame)
+            vision_ms = (now_monotonic() - t0) * 1000.0
+            t0 = now_monotonic()
             tracks = self._tracker.update(detections)
+            tracking_ms = (now_monotonic() - t0) * 1000.0
+            t0 = now_monotonic()
             click_actions = self._selector.select(tracks)
+            decision_ms = (now_monotonic() - t0) * 1000.0
+            self._last_frame_stage_timings = {
+                "feedback_ms": feedback_ms,
+                "vision_ms": vision_ms,
+                "tracking_ms": tracking_ms,
+                "decision_ms": decision_ms,
+            }
             return detections, tracks, click_actions, None
 
     @staticmethod
@@ -315,6 +349,8 @@ class Application:
                     print(f"\nDuration limit reached ({self._duration}s)")
                     break
                 t_start = now_monotonic()
+                if self._diagnostic:
+                    self._diagnostic.begin_frame()
 
                 frame, capture_ts = self._capture.grab()
                 t_after_capture = now_monotonic()
@@ -405,7 +441,39 @@ class Application:
                     clicks_sent=0,
                     behavioral=self._telemetry.behavioral.extract(len(tracks)),
                 )
+                telemetry_t0 = now_monotonic()
                 self._telemetry.log_frame(telem)
+                telemetry_ms = (now_monotonic() - telemetry_t0) * 1000.0
+
+                gui_t0 = now_monotonic()
+                vis = self._visualizer.render(
+                    frame, detections, tracks, actions,
+                    input_enabled=self._input_enabled, fps=self._current_fps,
+                )
+                gui_render_ms = (now_monotonic() - gui_t0) * 1000.0
+                gui_show_t0 = now_monotonic()
+                key = self._visualizer.show(vis)
+                gui_show_ms = (now_monotonic() - gui_show_t0) * 1000.0
+                if self._diagnostic:
+                    self._diagnostic.log(
+                        "frame_timing",
+                        capture_ms=self._capture.last_timing_ms.get("capture", 0.0),
+                        numpy_ms=self._capture.last_timing_ms.get("numpy", 0.0),
+                        feedback_ms=self._last_frame_stage_timings.get("feedback_ms", 0.0),
+                        vision_ms=self._last_frame_stage_timings.get("vision_ms", 0.0),
+                        tracking_ms=self._last_frame_stage_timings.get("tracking_ms", 0.0),
+                        decision_ms=self._last_frame_stage_timings.get("decision_ms", 0.0),
+                        behavior_ms=getattr(self._balloon_executor, "last_behavior_plan_ms", 0.0),
+                        executor_ms=locals().get("executor_ms", 0.0),
+                        telemetry_ms=telemetry_ms,
+                        gui_render_ms=gui_render_ms,
+                        gui_show_ms=gui_show_ms,
+                        diagnostic_ms=self._diagnostic.frame_log_duration_ms,
+                        frame_total_ms=(now_monotonic() - t_start) * 1000.0,
+                    )
+                if key == 27:
+                    self._running = False
+                    break
 
                 if self._frame_count % 60 == 0:
                     print(
@@ -508,6 +576,7 @@ class Application:
                     new_actions_allowed = not self._behavior or self._behavior.should_start_new_action(self._duration)
                     if self._diagnostic:
                         self._diagnostic.log("frame_to_executor", frame_id=self._frame_count, passed=new_actions_allowed, decision_actions=[self._action_info_for_diag(a) for a in self._balloon_frame_decision.actions], passed_actions=[self._action_info_for_diag(a) for a in (self._balloon_frame_decision.actions if new_actions_allowed else ())], g_passed=new_actions_allowed and self._balloon_frame_decision.g_action is not None, notification_count=len(self._balloon_frame_decision.notifications) if new_actions_allowed else 0, multicolor_count=len(self._balloon_frame_decision.multicolor_specials) if new_actions_allowed else 0, behavioral_gate=self._behavior_gate_diag(self._duration))
+                    executor_t0 = now_monotonic()
                     execution = self._balloon_executor.tick(
                         self._balloon_frame_decision.actions if new_actions_allowed else (),
                         self._balloon_frame_decision.g_action if new_actions_allowed else None,
@@ -519,6 +588,7 @@ class Application:
                         self._balloon_frame_decision.multicolor_specials if new_actions_allowed else (),
                         duration_s=self._duration,
                     )
+                    executor_ms = (now_monotonic() - executor_t0) * 1000.0
                     if self._diagnostic:
                         self._diagnostic.log("executor_result", frame_id=self._frame_count, clicks_sent=execution.clicks_sent, completed_primary=self._action_info_for_diag(execution.completed_primary_action), twin_completed=execution.twin_completion is not None, g_completed=execution.g_click_completed, primary_active=self._active_info_for_diag(self._balloon_executor.primary_scheduler.active_action), twin_active=self._twin_active_for_diag(), g_active=self._active_info_for_diag(self._balloon_executor.g_scheduler.active_action), idle_until=self._balloon_executor._idle_until)
                     clicks_this_frame = execution.clicks_sent
@@ -624,15 +694,6 @@ class Application:
                         f"Input: {'ON' if self._input_enabled else 'OFF'}"
                     )
                     sys.stdout.flush()
-
-                vis = self._visualizer.render(
-                    frame, detections, tracks, actions,
-                    input_enabled=self._input_enabled, fps=self._current_fps,
-                )
-                key = self._visualizer.show(vis)
-                if key == 27:
-                    self._running = False
-                    break
 
         except KeyboardInterrupt:
             pass
