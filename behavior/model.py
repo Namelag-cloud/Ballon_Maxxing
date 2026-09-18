@@ -70,6 +70,7 @@ class BehavioralModel:
             "notif_hit_rate_max": config.human_profile.notif_hit_rate_max,
             "duo_delta_min_ms": config.human_profile.duo_delta_min_ms,
             "duo_delta_max_ms": config.human_profile.duo_delta_max_ms,
+            "duo_y_variance_multiplier": config.human_profile.duo_y_variance_multiplier,
             "super_g_fail_rate_min": config.human_profile.super_g_fail_rate_min,
             "super_g_fail_rate_max": config.human_profile.super_g_fail_rate_max,
             "balloon_g_abandon_rate_min": config.human_profile.balloon_g_abandon_rate_min,
@@ -82,6 +83,8 @@ class BehavioralModel:
             "warmup_max_s": config.human_profile.warmup_max_s,
             "fatigue_min_ticks_per_min": config.human_profile.fatigue_min_ticks_per_min,
             "fatigue_max_ticks_per_min": config.human_profile.fatigue_max_ticks_per_min,
+            "fat_finger_probability": config.human_profile.fat_finger_probability,
+            "fat_finger_multiplier": config.human_profile.fat_finger_multiplier,
             "early_exit_prob_min": config.human_profile.early_exit_prob_min,
             "early_exit_prob_max": config.human_profile.early_exit_prob_max,
             "early_exit_ratio_min": config.human_profile.early_exit_ratio_min,
@@ -208,12 +211,15 @@ class BehavioralModel:
             if self._config.endpoint_error.enabled:
                 sigma = max(sigma, self._config.endpoint_error.scale_px)
                 sigma = min(sigma, max(1.0, self._config.endpoint_error.max_px))
-            dx = self._rng.normal(0.0, sigma)
-            dy = self._rng.normal(0.0, sigma)
-            # Small correlated hand/fat-finger component.
-            fat = self._rng.normal(0.0, self._profile.fat_finger_sigma_pct * max(1.0, target_width / 2.0))
-            actual_target_x = target_x + dx + fat
-            actual_target_y = target_y + dy + fat
+            sigma_y = sigma
+            if target_metadata and target_metadata.get("is_twin"):
+                sigma_y *= self._profile.duo_y_variance_multiplier
+            fat_finger = self._rng.random() < self._profile.fat_finger_probability
+            endpoint_multiplier = self._profile.fat_finger_multiplier if fat_finger else 1.0
+            dx = self._rng.normal(0.0, sigma * endpoint_multiplier)
+            dy = self._rng.normal(0.0, sigma_y * endpoint_multiplier)
+            actual_target_x = target_x + dx
+            actual_target_y = target_y + dy
 
         distance = math.hypot(target_x - current_x, target_y - current_y)
 
