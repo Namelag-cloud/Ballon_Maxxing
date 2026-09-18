@@ -107,8 +107,21 @@ class BalloonExecutor:
                 if g_position is None or (g_active.target_x, g_active.target_y) != g_position:
                     self._g_scheduler.cancel()
 
-        # G is a concurrent lane. It is ticked independently of the primary
-        # normal/special lane and only starts a new click while still visible.
+        # G is a concurrent lane. Start a visible G action before ticking the
+        # scheduler so a newly observed symbol participates in this polling
+        # cycle instead of waiting an extra cycle before reaction/movement.
+        # A completed click may schedule the next click below, but that new
+        # action intentionally waits for the next tick; only one G click is
+        # dispatched per executor tick.
+        if self._g_visible and self._g_scheduler.is_idle and input_enabled:
+            self._start_single(
+                self._g_scheduler,
+                self._latest_g,
+                input_backend,
+                region_left,
+                region_top,
+            )
+
         g_completion = self._g_scheduler.tick(input_backend)
         if g_completion is not None:
             clicks += 1
@@ -129,19 +142,9 @@ class BalloonExecutor:
                 region_top,
             )
 
-        if not self._g_visible and not self._g_scheduler.is_idle:
-            # Let an in-flight click finish safely. No new G action will be
-            # scheduled after disappearance.
-            pass
-
-        if self._g_visible and self._g_scheduler.is_idle and input_enabled:
-            self._start_single(
-                self._g_scheduler,
-                self._latest_g,
-                input_backend,
-                region_left,
-                region_top,
-            )
+        # If G disappears, refresh/cancellation above prevents any new action
+        # from being scheduled. An already-dispatched click is allowed to
+        # finish through the scheduler. No counter is involved in G lifetime.
 
         if self._twin_scheduler.is_idle and self._primary_scheduler.is_idle:
             if actions and input_enabled:
