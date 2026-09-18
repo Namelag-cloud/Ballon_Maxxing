@@ -10,14 +10,23 @@ class SessionOutcome:
 
     target_id: Optional[int] = None
     target_type: Optional[str] = None
+    target_radius_px: Optional[float] = None
     target_first_seen_ts: Optional[float] = None
     acquisition_ts: Optional[float] = None
     planned_dispatch_ts: Optional[float] = None
+    behavioral_planning_ts: Optional[float] = None
     dispatch_ts: Optional[float] = None
+    actual_click_down_ts: Optional[float] = None
     observed_pop_ts: Optional[float] = None
     estimated_reaction_ticks: Optional[float] = None
+    estimated_acquisition_click_ticks: Optional[float] = None
+    estimated_click_tick: Optional[float] = None
     click_tick_modulo: Optional[int] = None
     timing_error_ms: Optional[float] = None
+    intended_vs_observed_timing_error_ms: Optional[float] = None
+    modeled_perception_ticks: Optional[float] = None
+    scheduler_delay_ms: Optional[float] = None
+    movement_duration_ms: Optional[float] = None
     screen_click_x: Optional[int] = None
     screen_click_y: Optional[int] = None
     world_x_estimate: Optional[float] = None
@@ -27,6 +36,10 @@ class SessionOutcome:
     intended_reaction_s: Optional[float] = None
     hit: Optional[bool] = None
     notification: Optional[bool] = None
+    gemini_observed: Optional[bool] = None
+    gemini_selected: Optional[bool] = None
+    gemini_executed: Optional[bool] = None
+    gemini_completed: Optional[bool] = None
     duo_delta_ms: Optional[float] = None
     special_sequence_outcome: Optional[str] = None
     balloon_g_outcome: Optional[str] = None
@@ -49,7 +62,8 @@ class TimingCalibration:
         if observed_ticks is not None:
             self.observed_reaction_ticks.append(float(observed_ticks))
         self.wall_clock_error_ms.append(float(wall_clock_error_ms))
-        self.click_tick_modulo.append(int(round(observed_ticks)) % 60 if observed_ticks is not None else 0)
+        if observed_ticks is not None:
+            self.click_tick_modulo.append(int(round(observed_ticks)) % 3)
 
     def summary(self) -> dict:
         def stats(values):
