@@ -636,6 +636,16 @@ class Application:
 
         except KeyboardInterrupt:
             pass
+        finally:
+            if self._balloon_executor is not None and self._input_backend is not None:
+                for outcome in self._balloon_executor.shutdown(
+                    self._input_backend,
+                    reason="session_end",
+                ):
+                    if self._last_feedback is not None:
+                        outcome.feedback_confidence = self._last_feedback.confidence
+                        outcome.observation_notes.extend(self._last_feedback.notes)
+                    self._telemetry.record_outcome(outcome)
 
         self._telemetry.save()
         print(f"\nTelemetry saved to {self._telemetry._output_dir}")
