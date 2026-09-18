@@ -185,6 +185,7 @@ class BehavioralModel:
         target_metadata: Optional[dict] = None,
         acquisition_timestamp: float | None = None,
     ) -> BehavioralAction:
+        planned_at = time.perf_counter()
         if not self._session_started:
             self.start_session()
 
@@ -281,8 +282,6 @@ class BehavioralModel:
 
         endpoint_err = math.hypot(actual_target_x - target_x, actual_target_y - target_y)
         total_s = reaction_s + movement_s + click_s + pause_s
-        planned_at = time.perf_counter()
-
         return BehavioralAction(
             reaction_time_s=reaction_s,
             movement_time_s=movement_s,
