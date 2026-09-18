@@ -254,7 +254,7 @@ class BalloonExecutor:
             # This is a relative tick estimate from first-seen, not an engine tick.
             estimated_click_tick = observed_reaction
             timing_error_ms = (observed_reaction - behavioral_action.intended_reaction_ticks) * (1000.0 / 60.0)
-        scheduler_delay_ms = max(0.0, (timestamps.reaction_start - timestamps.action_planned) * 1000.0)
+        scheduler_delay_ms = max(0.0, (timestamps.reaction_end - timestamps.action_planned) * 1000.0 - behavioral_action.reaction_time_s * 1000.0)
         movement_duration_ms = max(0.0, (timestamps.movement_end - timestamps.movement_start) * 1000.0)
         is_gemini = target_type == "multicolor_special"
         return SessionOutcome(
