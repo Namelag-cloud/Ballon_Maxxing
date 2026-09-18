@@ -78,6 +78,41 @@ class TestBalloonVision(unittest.TestCase):
         self.assertEqual(twins[0]["color_name"], "yellow")
         self.assertTrue(twins[0]["is_twin"])
 
+    def test_solid_edge_ui_components_are_not_balloon_targets(self):
+        frame = np.full((900, 900, 3), 30, dtype=np.uint8)
+
+        # Simulate the colored UI/background components observed at the top and
+        # bottom edges. They have balloon colors but are solid rectangular
+        # components, not balloon-shaped cores.
+        cv2.rectangle(frame, (0, 0), (899, 39), COLORS["blue"], -1)
+        cv2.rectangle(frame, (0, 860), (899, 899), COLORS["red"], -1)
+
+        # A real balloon can legitimately touch the frame edge and must remain
+        # detectable. These are intentionally clipped by the left/bottom edges.
+        self._balloon(frame, (0, 220), 70, "green")
+        self._balloon(frame, (700, 899), 70, "yellow")
+
+        detections = BalloonGameProfile().detect(frame)
+
+        self.assertFalse(any(
+            d["color_name"] == "blue" and d["center"][1] < 40
+            for d in detections
+        ))
+        self.assertFalse(any(
+            d["color_name"] == "red" and d["center"][1] > 860
+            for d in detections
+        ))
+
+        edge_balloons = [
+            d for d in detections
+            if d["color_name"] in {"green", "yellow"}
+        ]
+        self.assertEqual(len(edge_balloons), 2)
+        self.assertTrue(all(
+            d["target_type"] == TargetType.NORMAL_BALLOON.value
+            for d in edge_balloons
+        ))
+
     def test_white_balloon_glow_is_non_actionable(self):
         frame = np.full((900, 900, 3), 30, dtype=np.uint8)
         cv2.circle(frame, (450, 450), 90, (45, 60, 245), -1)
