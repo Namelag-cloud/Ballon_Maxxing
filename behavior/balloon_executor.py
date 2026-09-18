@@ -64,7 +64,7 @@ class BalloonExecutor:
     def latest_g(self) -> BalloonAction | None:
         return self._latest_g
 
-    def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled) -> BalloonExecutionResult:
+    def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=()) -> BalloonExecutionResult:
         now = self._clock()
         self._g_visible = g_action is not None
         self._latest_g = g_action
@@ -102,7 +102,11 @@ class BalloonExecutor:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
         if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle:
-            if actions and input_enabled:
+            if input_enabled and notifications and self._behavior.should_click_notification():
+                action = notifications[0]
+                self._start_single(self._primary_scheduler, action, region_left, region_top)
+                self._active_primary = action
+            elif actions and input_enabled:
                 action = actions[0]
                 if isinstance(action, TwinAction):
                     self._start_twin(action, region_left, region_top)
