@@ -95,6 +95,28 @@ class TestBehavioralReplayValidation(unittest.TestCase):
         self.assertFalse(model.should_early_exit(10.0))
         model._session_start -= 6.0
         self.assertTrue(model.should_early_exit(10.0))
+
+    def test_start_delay_and_final_activity_cutoff_are_enforced(self):
+        profile = HumanProfileConfig(start_delay_min_s=2.0, start_delay_max_s=2.0, final_activity_cutoff_s=1.5)
+        model = BehavioralModel(BehaviorConfig(enabled=True, seed=5, human_profile=profile))
+        model.start_session()
+        self.assertFalse(model.actions_ready())
+        model._session_start -= 2.1
+        self.assertTrue(model.actions_ready())
+        model._session_start -= 6.0
+        self.assertFalse(model.should_start_new_action(10.0))
+
+    def test_profile_failure_and_gemini_probabilities_are_used(self):
+        profile = HumanProfileConfig(
+            super_g_fail_rate_min=1.0, super_g_fail_rate_max=1.0,
+            balloon_g_abandon_rate_min=1.0, balloon_g_abandon_rate_max=1.0,
+            gemini_without_notification_probability=1.0,
+        )
+        model = BehavioralModel(BehaviorConfig(enabled=True, seed=6, human_profile=profile))
+        self.assertTrue(model.should_fail_super_g())
+        self.assertTrue(model.should_abandon_balloon_g())
+        self.assertTrue(model.should_select_gemini_without_notification())
+
     def test_scheduler_uses_behavioral_endpoint_not_center(self):
         scheduler = ActionScheduler()
         action = make_action(123.4, 234.6)
