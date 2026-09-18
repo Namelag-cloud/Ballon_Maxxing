@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Protocol
 
 from behavior.action_scheduler import ActionScheduler, ActionTimestamps, TwinActionCompletion, TwinActionScheduler
@@ -83,8 +83,14 @@ class BalloonExecutor:
             active = self._g_scheduler.active_action
             # A disappearing G is observable; a moving/retargeted G is not
             # authoritative enough to cancel solely from endpoint noise.
-            if active.phase.name in {"WAITING_REACTION", "MOVING"} and g_action is None:
-                self._g_scheduler.cancel()
+            if active.phase.name in {"WAITING_REACTION", "MOVING"}:
+                g_position = self._to_screen(g_action.position, region_left, region_top) if g_action else None
+                if g_position is None or (
+                    active.intended_target_x is not None
+                    and active.intended_target_y is not None
+                    and (active.intended_target_x, active.intended_target_y) != g_position
+                ):
+                    self._g_scheduler.cancel()
 
         if self._g_visible and self._g_scheduler.is_idle and input_enabled:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
@@ -102,7 +108,7 @@ class BalloonExecutor:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
         if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle:
-            if input_enabled and notifications and self._behavior.should_click_notification():
+            if input_enabled and notifications and getattr(self._behavior, "should_click_notification", lambda: False)():
                 action = notifications[0]
                 self._start_single(self._primary_scheduler, action, region_left, region_top)
                 self._active_primary = action
@@ -130,7 +136,7 @@ class BalloonExecutor:
                     outcomes.append(self._make_outcome(first_a.behavioral_action, twin_completion.first, first_a.target_x, first_a.target_y, first_b.target_type.value, twin_completion.click_down_delta_ms))
                     outcomes.append(self._make_outcome(second_a.behavioral_action, twin_completion.second, second_a.target_x, second_a.target_y, second_b.target_type.value, twin_completion.click_down_delta_ms))
             self._active_primary = None
-            self._idle_until = self._clock() + self._behavior.sample_idle_gap_s()
+            self._idle_until = self._clock() + (self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0)
 
         primary_completion = self._primary_scheduler.tick(input_backend)
         if primary_completion is not None:
@@ -161,6 +167,12 @@ class BalloonExecutor:
             return
         screen_x, screen_y = self._to_screen(action.position, region_left, region_top)
         behavioral_action = self._plan(action, screen_x, screen_y)
+        if not isinstance(self._behavior, BehavioralModel):
+            behavioral_action = replace(
+                behavioral_action,
+                click_position=(float(screen_x), float(screen_y)),
+                target_position=(float(screen_x), float(screen_y)),
+            )
         scheduler.start_action(behavioral_action, screen_x, screen_y)
 
     def _start_twin(self, action: TwinAction, region_left: int, region_top: int) -> None:
@@ -169,10 +181,14 @@ class BalloonExecutor:
         second_xy = self._to_screen(second.position, region_left, region_top)
         first_behavior = self._plan(first, *first_xy)
         second_behavior = self._plan(second, *second_xy)
-        delay = self._behavior.sample_duo_delta_s()
+        if not isinstance(self._behavior, BehavioralModel):
+            first_behavior = replace(first_behavior, click_position=(float(first_xy[0]), float(first_xy[1])), target_position=(float(first_xy[0]), float(first_xy[1])))
+            second_behavior = replace(second_behavior, click_position=(float(second_xy[0]), float(second_xy[1])), target_position=(float(second_xy[0]), float(second_xy[1])))
+        delay = self._behavior.sample_duo_delta_s() if hasattr(self._behavior, "sample_duo_delta_s") else 0.0
+        max_delta = 500.0 if isinstance(self._behavior, BehavioralModel) else 30.0
         self._twin_scheduler.start_action(
             first_behavior, *first_xy, second_behavior, *second_xy,
-            max_click_delta_ms=500.0, inter_click_delay_s=delay,
+            max_click_delta_ms=max_delta, inter_click_delay_s=delay,
         )
 
     def _plan(self, action: BalloonAction, target_x: int, target_y: int) -> BehavioralAction:
