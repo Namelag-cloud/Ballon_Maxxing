@@ -57,6 +57,55 @@ class BalloonGameProfile(GameProfile):
                 self._settings.detection.morphology_kernel,
             ),
         )
+        self._last_profile = self._empty_profile()
+
+    @staticmethod
+    def _empty_profile() -> dict:
+        return {
+            "total_ms": 0.0,
+            "hsv_ms": 0.0,
+            "blue_ms": 0.0,
+            "red_ms": 0.0,
+            "yellow_ms": 0.0,
+            "green_ms": 0.0,
+            "blue_mask_ms": 0.0,
+            "red_mask_ms": 0.0,
+            "yellow_mask_ms": 0.0,
+            "green_mask_ms": 0.0,
+            "blue_morphology_ms": 0.0,
+            "red_morphology_ms": 0.0,
+            "yellow_morphology_ms": 0.0,
+            "green_morphology_ms": 0.0,
+            "blue_components_ms": 0.0,
+            "red_components_ms": 0.0,
+            "yellow_components_ms": 0.0,
+            "green_components_ms": 0.0,
+            "blue_component_analysis_ms": 0.0,
+            "red_component_analysis_ms": 0.0,
+            "yellow_component_analysis_ms": 0.0,
+            "green_component_analysis_ms": 0.0,
+            "multicolor_ms": 0.0,
+            "g_detector_ms": 0.0,
+            "ring_total_ms": 0.0,
+            "ring_hough_ms": 0.0,
+            "ring_grayscale_ms": 0.0,
+            "ring_blur_ms": 0.0,
+            "ring_canny_ms": 0.0,
+            "ring_scoring_ms": 0.0,
+            "classification_ms": 0.0,
+            "normal_candidate_count": 0,
+            "ring_call_count": 0,
+            "hough_call_count": 0,
+            "component_count": 0,
+            "candidate_counts": {"blue": 0, "red": 0, "yellow": 0, "green": 0},
+            "ring_circles_returned": 0,
+        }
+
+    @property
+    def last_profile(self) -> dict:
+        profile = dict(self._last_profile)
+        profile["candidate_counts"] = dict(self._last_profile["candidate_counts"])
+        return profile
 
     @property
     def name(self) -> str:
@@ -68,7 +117,13 @@ class BalloonGameProfile(GameProfile):
 
     def detect(self, bgr_frame: np.ndarray) -> list[dict]:
         """Return structured detections serialized for the existing profile API."""
+        total_t0 = time.perf_counter()
+        self._last_profile = self._empty_profile()
+
+        hsv_t0 = time.perf_counter()
         hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
+        self._last_profile["hsv_ms"] = (time.perf_counter() - hsv_t0) * 1000.0
+
         candidates: list[TargetDetection] = []
 
         for color_name in ("blue", "red", "yellow", "green"):
@@ -76,14 +131,15 @@ class BalloonGameProfile(GameProfile):
                 self._detect_color_components(hsv, color_name)
             )
 
+        multicolor_t0 = time.perf_counter()
         candidates.extend(self._detect_multicolor_special(hsv))
-        candidates.extend(self._g_detector.detect(hsv))
+        self._last_profile["multicolor_ms"] = (time.perf_counter() - multicolor_t0) * 1000.0
 
-        # Use the upper portion of the observed balloon-size distribution as
-        # the frame-local reference for special-vs-twin classification. The
-        # reference video shows twins substantially smaller than the normal and
-        # special balloon cores, so this is more scale-robust than a fixed pixel
-        # threshold while resisting small balloons pulling the reference down.
+        g_t0 = time.perf_counter()
+        candidates.extend(self._g_detector.detect(hsv))
+        self._last_profile["g_detector_ms"] = (time.perf_counter() - g_t0) * 1000.0
+
+        classification_t0 = time.perf_counter()
         balloon_diameters = [
             max(d.width, d.height)
             for d in candidates
@@ -95,12 +151,33 @@ class BalloonGameProfile(GameProfile):
             if balloon_diameters
             else 0.0
         )
+        self._last_profile["classification_ms"] += (
+            time.perf_counter() - classification_t0
+        ) * 1000.0
+
+        self._last_profile["normal_candidate_count"] = len(balloon_diameters)
 
         classified: list[TargetDetection] = []
         for detection in candidates:
+            classification_t0 = time.perf_counter()
             if detection.target_type == TargetType.NORMAL_BALLOON and detection.color:
                 features = detection.visual_features
+                classification_ms_before_ring = (time.perf_counter() - classification_t0) * 1000.0
+                self._last_profile["classification_ms"] += classification_ms_before_ring
+
                 ring = self._ring.detect(bgr_frame, detection.bbox)
+                ring_profile = self._ring.last_profile
+                self._last_profile["ring_total_ms"] += float(ring_profile["total_ms"])
+                self._last_profile["ring_hough_ms"] += float(ring_profile["hough_ms"])
+                self._last_profile["ring_grayscale_ms"] += float(ring_profile["grayscale_ms"])
+                self._last_profile["ring_blur_ms"] += float(ring_profile["blur_ms"])
+                self._last_profile["ring_canny_ms"] += float(ring_profile["canny_ms"])
+                self._last_profile["ring_scoring_ms"] += float(ring_profile["scoring_ms"])
+                self._last_profile["ring_call_count"] += 1
+                self._last_profile["hough_call_count"] += int(ring_profile["hough_called"])
+                self._last_profile["ring_circles_returned"] += int(ring_profile["circles_returned"])
+
+                classification_t0 = time.perf_counter()
                 features = replace(
                     features,
                     ring_detected=ring.detected,
@@ -148,10 +225,23 @@ class BalloonGameProfile(GameProfile):
                     visual_features=features,
                 )
 
+                self._last_profile["classification_ms"] += (
+                    time.perf_counter() - classification_t0
+                ) * 1000.0
+
+            else:
+                self._last_profile["classification_ms"] += (
+                    time.perf_counter() - classification_t0
+                ) * 1000.0
+
             classified.append(detection)
 
+        assembly_t0 = time.perf_counter()
         classified.sort(key=lambda d: (d.center[1], d.center[0], d.target_type.value))
-        return [d.as_dict() for d in classified]
+        result = [d.as_dict() for d in classified]
+        self._last_profile["classification_ms"] += (time.perf_counter() - assembly_t0) * 1000.0
+        self._last_profile["total_ms"] = (time.perf_counter() - total_t0) * 1000.0
+        return result
 
     def to_tracking_detections(self, detections: list[dict]) -> list[Detection]:
         """Adapt profile detections to the generic tracker without exposing game rules."""
@@ -228,14 +318,26 @@ class BalloonGameProfile(GameProfile):
         hsv: np.ndarray,
         color_name: str,
     ) -> list[TargetDetection]:
+        total_t0 = time.perf_counter()
+        mask_t0 = time.perf_counter()
         mask = self._classifier.make_color_mask(hsv, color_name)
+        mask_ms = (time.perf_counter() - mask_t0) * 1000.0
+
+        morphology_t0 = time.perf_counter()
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._kernel, iterations=1)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self._kernel, iterations=1)
+        morphology_ms = (time.perf_counter() - morphology_t0) * 1000.0
 
+        components_t0 = time.perf_counter()
         count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        components_ms = (time.perf_counter() - components_t0) * 1000.0
+
         detections: list[TargetDetection] = []
         color = BalloonColor(color_name)
         frame_height = float(hsv.shape[0])
+
+        component_analysis_t0 = time.perf_counter()
+        self._last_profile["component_count"] += max(0, count - 1)
 
         for label in range(1, count):
             x, y, w, h, area = [int(v) for v in stats[label]]
@@ -293,11 +395,6 @@ class BalloonGameProfile(GameProfile):
                 self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
                 and circularity >= self._CORE_MIN_CIRCULARITY
             ):
-                # Thin colored rings, solid UI/background components, and the
-                # multicolor star are not balloon cores and are handled by
-                # their own visual classification. The shape test is
-                # coordinate-independent so legitimate edge-clipped balloons
-                # remain eligible.
                 continue
 
             color_name_detected, confidence = self._classifier.classify_mask(
@@ -321,6 +418,13 @@ class BalloonGameProfile(GameProfile):
                 )
             )
 
+        component_analysis_ms = (time.perf_counter() - component_analysis_t0) * 1000.0
+        self._last_profile[f"{color_name}_ms"] = (time.perf_counter() - total_t0) * 1000.0
+        self._last_profile[f"{color_name}_mask_ms"] = mask_ms
+        self._last_profile[f"{color_name}_morphology_ms"] = morphology_ms
+        self._last_profile[f"{color_name}_components_ms"] = components_ms
+        self._last_profile[f"{color_name}_component_analysis_ms"] = component_analysis_ms
+        self._last_profile["candidate_counts"][color_name] = len(detections)
         return detections
 
     def _detect_multicolor_special(self, hsv: np.ndarray) -> list[TargetDetection]:
