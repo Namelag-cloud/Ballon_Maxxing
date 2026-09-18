@@ -245,6 +245,24 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         disappeared = self.executor.tick([], None, self.input, 0, 0, True)
         self.assertFalse(disappeared.g_click_completed)
 
+    def test_primary_action_is_cancelled_if_target_disappears_before_dispatch(self):
+        action = self.engine.decide([
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.RED, (100, 100), 31)
+        ]).actions
+
+        # Start the behavioral plan while the target is visible.
+        self.executor.tick(action, None, self.input, 0, 0, True)
+        self.assertFalse(self.executor.primary_scheduler.is_idle)
+
+        # The next observation no longer contains that target. It must not
+        # progress to mouse-down from the stale plan.
+        self.clock.value = 1.0
+        result = self.executor.tick([], None, self.input, 0, 0, True)
+
+        self.assertFalse(result.completed_primary_action)
+        self.assertTrue(self.executor.primary_scheduler.is_idle)
+        self.assertEqual(self.input.downs, [])
+
     def test_tracker_preserves_game_metadata_without_interpreting_it(self):
         tracker = Tracker(self.settings)
         detection = Detection(
