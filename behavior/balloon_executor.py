@@ -132,7 +132,7 @@ class BalloonExecutor:
                     action = multicolor_specials[0]
                 elif actions:
                     action = actions[0]
-                if action is not None and action.target_type.value == "special_sequence_balloon":
+                if isinstance(action, BalloonAction) and action.target_type.value == "special_sequence_balloon":
                     if action.target_id != self._special_fail_target_id:
                         self._special_fail_target_id = action.target_id
                         self._special_should_execute = not getattr(self._behavior, "should_fail_super_g", lambda: False)()
