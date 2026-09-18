@@ -66,7 +66,7 @@ class BalloonExecutor:
     def latest_g(self) -> BalloonAction | None:
         return self._latest_g
 
-    def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=()) -> BalloonExecutionResult:
+    def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=(), multicolor_specials=()) -> BalloonExecutionResult:
         now = self._clock()
         self._g_visible = g_action is not None
         actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)()
@@ -116,8 +116,14 @@ class BalloonExecutor:
                 action = notifications[0]
                 self._start_single(self._primary_scheduler, action, region_left, region_top)
                 self._active_primary = action
-            elif actions and input_enabled:
-                action = actions[0]
+            elif input_enabled:
+                candidate_actions = tuple(actions)
+                if not notifications and multicolor_specials and getattr(self._behavior, "should_select_gemini_without_notification", lambda: False)():
+                    candidate_actions = candidate_actions + (multicolor_specials[0],)
+                if not candidate_actions:
+                    candidate_actions = ()
+                if candidate_actions:
+                    action = candidate_actions[0]
                 if isinstance(action, TwinAction):
                     self._start_twin(action, region_left, region_top)
                 else:
