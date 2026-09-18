@@ -35,6 +35,7 @@ from decision.mechanics import BalloonDecisionEngine
 from behavior.model import BehavioralModel
 from behavior.action_scheduler import ActionScheduler
 from behavior.balloon_executor import BalloonExecutor
+from diagnostics.downstream import DownstreamDiagnostic
 
 
 def _balloon_action_to_click_actions(action: BalloonAction | TwinAction) -> list[ClickAction]:
@@ -134,7 +135,8 @@ class Application:
         self._vision = VisionPipeline(settings)
         self._tracker = Tracker(settings)
         self._selector = TargetSelector(settings)
-        self._input_backend = SendInputBackend() if settings.input.enabled else None
+        self._diagnostic = DownstreamDiagnostic() if game_profile and game_profile.game_type == GameType.BALLOON_GAME else None
+        self._input_backend = SendInputBackend(diagnostic=self._diagnostic) if settings.input.enabled else None
         self._telemetry = TelemetryLogger()
         self._feedback_reader = FeedbackReader(
             combo_roi=settings.feedback.combo_roi,
@@ -159,7 +161,7 @@ class Application:
             )
             self._action_scheduler = ActionScheduler()
             if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
-                self._balloon_executor = BalloonExecutor(self._behavior)
+                self._balloon_executor = BalloonExecutor(self._behavior, diagnostic=self._diagnostic)
         if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
             self._balloon_decision = BalloonDecisionEngine(settings)
 
@@ -228,6 +230,8 @@ class Application:
 
                 decision = self._balloon_decision.decide(current_detections)
                 self._balloon_frame_decision = decision
+                if self._diagnostic:
+                    self._diagnostic.log("tracking_decision", frame_id=self._frame_count + 1, detections=[{"type": d.get("target_type"), "id": d.get("target_id"), "color": d.get("color_name"), "center": d.get("center")} for d in current_detections], detection_counts=self._count_types(current_detections), actionable=[self._action_info_for_diag(a) for a in decision.actions], actionable_counts=self._count_types_from_actions(decision.actions), g_action=self._action_info_for_diag(decision.g_action), multicolor_specials=[self._action_info_for_diag(a) for a in decision.multicolor_specials], notifications=[self._action_info_for_diag(a) for a in decision.notifications], mode=decision.mode.value, special_step=decision.special_step.value)
 
                 click_actions: list[ClickAction] = []
                 game_actions: list[GameAction] = []
@@ -248,6 +252,50 @@ class Application:
             tracks = self._tracker.update(detections)
             click_actions = self._selector.select(tracks)
             return detections, tracks, click_actions, None
+
+    @staticmethod
+    def _count_types(detections):
+        counts = {}
+        for d in detections:
+            key = d.get("target_type")
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    @staticmethod
+    def _count_types_from_actions(actions):
+        counts = {}
+        for action in actions:
+            key = type(action).__name__ if isinstance(action, TwinAction) else action.target_type.value
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    @staticmethod
+    def _action_info_for_diag(action):
+        if action is None:
+            return None
+        if isinstance(action, TwinAction):
+            return {"type": "TwinAction", "targets": [Application._action_info_for_diag(t) for t in action.targets]}
+        return {"type": action.target_type.value, "id": action.target_id, "color": action.color.value if action.color else None, "position": list(action.position), "width": action.target_width}
+
+    @staticmethod
+    def _active_info_for_diag(active):
+        if active is None:
+            return None
+        return {"phase": active.phase.name, "target_x": active.target_x, "target_y": active.target_y, "intended_target_x": active.intended_target_x, "intended_target_y": active.intended_target_y}
+
+    def _twin_active_for_diag(self):
+        active = self._balloon_executor.twin_scheduler.active_actions
+        if active is None:
+            return None
+        return [self._active_info_for_diag(a) for a in active]
+
+    def _behavior_gate_diag(self, duration_s):
+        if not self._behavior:
+            return {}
+        elapsed = self._behavior.session_elapsed_s()
+        cutoff = self._behavior.activity_cutoff_s()
+        deadline = None if not duration_s or duration_s <= 0 else duration_s - cutoff
+        return {"session_started": self._behavior._session_started, "session_elapsed_s": elapsed, "start_delay_s": self._behavior.start_delay_s, "actions_ready": self._behavior.actions_ready(), "activity_cutoff_s": cutoff, "final_activity_deadline_s": deadline, "final_activity_cutoff_active": bool(deadline is not None and elapsed >= deadline)}
 
     def _run_benchmark(self) -> None:
         print("Running BENCHMARK mode - no mouse input, measuring raw pipeline speed")
@@ -392,7 +440,7 @@ class Application:
             self._settings.input.enabled = True
             self._input_enabled = True
 
-        self._input_backend = SendInputBackend()
+        self._input_backend = SendInputBackend(diagnostic=self._diagnostic)
         if self._balloon_executor:
             self._balloon_executor.set_mouse_position(
                 (self._input_backend._last_x, self._input_backend._last_y)
@@ -458,6 +506,8 @@ class Application:
 
                 if self._balloon_executor and self._balloon_frame_decision is not None:
                     new_actions_allowed = not self._behavior or self._behavior.should_start_new_action(self._duration)
+                    if self._diagnostic:
+                        self._diagnostic.log("frame_to_executor", frame_id=self._frame_count, passed=new_actions_allowed, decision_actions=[self._action_info_for_diag(a) for a in self._balloon_frame_decision.actions], passed_actions=[self._action_info_for_diag(a) for a in (self._balloon_frame_decision.actions if new_actions_allowed else ())], g_passed=new_actions_allowed and self._balloon_frame_decision.g_action is not None, notification_count=len(self._balloon_frame_decision.notifications) if new_actions_allowed else 0, multicolor_count=len(self._balloon_frame_decision.multicolor_specials) if new_actions_allowed else 0, behavioral_gate=self._behavior_gate_diag(self._duration))
                     execution = self._balloon_executor.tick(
                         self._balloon_frame_decision.actions if new_actions_allowed else (),
                         self._balloon_frame_decision.g_action if new_actions_allowed else None,
@@ -469,6 +519,8 @@ class Application:
                         self._balloon_frame_decision.multicolor_specials if new_actions_allowed else (),
                         duration_s=self._duration,
                     )
+                    if self._diagnostic:
+                        self._diagnostic.log("executor_result", frame_id=self._frame_count, clicks_sent=execution.clicks_sent, completed_primary=self._action_info_for_diag(execution.completed_primary_action), twin_completed=execution.twin_completion is not None, g_completed=execution.g_click_completed, primary_active=self._active_info_for_diag(self._balloon_executor.primary_scheduler.active_action), twin_active=self._twin_active_for_diag(), g_active=self._active_info_for_diag(self._balloon_executor.g_scheduler.active_action), idle_until=self._balloon_executor._idle_until)
                     clicks_this_frame = execution.clicks_sent
                     if execution.input_timestamp is not None:
                         input_ts = execution.input_timestamp
