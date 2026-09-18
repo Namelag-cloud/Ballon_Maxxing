@@ -536,6 +536,29 @@ class TestBehavioralModel:
             action = model.plan_action(0, 0, 500, 500, 50)
             assert not action.is_miss
 
+    def test_non_miss_endpoint_error_is_bounded_relative_to_small_target(self):
+        config = BehaviorConfig(
+            enabled=True,
+            seed=42,
+            errors=ErrorConfig(enabled=True, miss_probability=0.0),
+            endpoint_error=EndpointErrorConfig(
+                enabled=True,
+                scale_px=20.0,
+                max_px=50.0,
+                max_radius_fraction=0.5,
+            ),
+        )
+        model = BehavioralModel(config)
+
+        for _ in range(200):
+            action = model.plan_action(0, 0, 100, 100, 20.0)
+            error = math.hypot(
+                action.click_position[0] - 100,
+                action.click_position[1] - 100,
+            )
+            assert error <= 5.0 + 1e-9
+            assert not action.is_miss
+
     def test_miss_possible_when_enabled(self):
         model = self._make_model(
             errors=ErrorConfig(enabled=True, miss_probability=0.5),
