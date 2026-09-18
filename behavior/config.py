@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any
 
 
 @dataclass
 class ReactionTimeConfig:
     distribution: str = "lognormal"
-    median_ms: float = 300.0
-    sigma: float = 0.45
-    minimum_ms: float = 150.0
+    median_ms: float = 333.32
+    sigma: float = 0.35
+    minimum_ms: float = 149.994
     maximum_ms: float = 2500.0
+    perception_min_ticks: float = 2.0
+    perception_max_ticks: float = 5.0
+    ar1: float = 0.30
 
 
 @dataclass
@@ -49,18 +51,20 @@ class ClickConfig:
 
 @dataclass
 class ErrorConfig:
-    enabled: bool = False
-    miss_probability: float = 0.005
+    enabled: bool = True
+    miss_probability: float = 0.035
     delayed_response_probability: float = 0.02
     extra_pause_probability: float = 0.01
     extra_pause_min_ms: float = 200.0
     extra_pause_max_ms: float = 800.0
+    miss_min_radius: float = 1.5
+    miss_max_radius: float = 2.5
 
 
 @dataclass
 class WarmupConfig:
     enabled: bool = True
-    duration_s: float = 30.0
+    duration_s: float = 20.0
     modifier: float = 0.15
 
 
@@ -85,12 +89,54 @@ class EndpointErrorConfig:
     enabled: bool = True
     scale_px: float = 5.0
     max_px: float = 12.0
+    spatial_sigma_pct: float = 0.16
+    fat_finger_sigma_pct: float = 0.025
+
+
+@dataclass
+class HumanProfileConfig:
+    enabled: bool = True
+    reaction_mu_ticks_min: float = 12.0
+    reaction_mu_ticks_max: float = 32.0
+    spatial_sigma_pct_min: float = 0.10
+    spatial_sigma_pct_max: float = 0.22
+    miss_rate_min: float = 0.02
+    miss_rate_max: float = 0.05
+    notif_hit_rate_min: float = 0.005
+    notif_hit_rate_max: float = 0.02
+    duo_delta_min_ms: float = 50.0
+    duo_delta_max_ms: float = 500.0
+    duo_delta_median_ms: float = 150.0
+    super_g_fail_rate_min: float = 0.08
+    super_g_fail_rate_max: float = 0.22
+    balloon_g_abandon_rate_min: float = 0.05
+    balloon_g_abandon_rate_max: float = 0.15
+    idle_lambda_min: float = 0.03
+    idle_lambda_max: float = 0.08
+    start_delay_min_s: float = 1.0
+    start_delay_max_s: float = 3.0
+    warmup_min_s: float = 15.0
+    warmup_max_s: float = 25.0
+    fatigue_min_ticks_per_min: float = 0.5
+    fatigue_max_ticks_per_min: float = 2.0
+    early_exit_prob_min: float = 0.05
+    early_exit_prob_max: float = 0.15
+    early_exit_ratio_min: float = 0.80
+    early_exit_ratio_max: float = 0.95
+    reaction_sigma: float = 0.35
+    reaction_ar1: float = 0.30
+    perception_min_ticks: float = 2.0
+    perception_max_ticks: float = 5.0
+    duo_delta_sigma: float = 0.4
+    fat_finger_sigma_pct: float = 0.025
 
 
 @dataclass
 class BehaviorConfig:
     enabled: bool = False
-    seed: int = 12345
+    # None means entropy-seeded per session. An explicit value is retained as
+    # a reproducible debug override and never represents the game seed.
+    seed: int | None = None
     reaction_time: ReactionTimeConfig = field(default_factory=ReactionTimeConfig)
     movement: MovementConfig = field(default_factory=MovementConfig)
     trajectory: TrajectoryConfig = field(default_factory=TrajectoryConfig)
@@ -101,31 +147,27 @@ class BehaviorConfig:
     fatigue: FatigueConfig = field(default_factory=FatigueConfig)
     micro_pauses: MicroPauseConfig = field(default_factory=MicroPauseConfig)
     endpoint_error: EndpointErrorConfig = field(default_factory=EndpointErrorConfig)
+    human_profile: HumanProfileConfig = field(default_factory=HumanProfileConfig)
 
     @classmethod
-    def from_dict(cls, data: dict) -> BehaviorConfig:
-        rt_data = data.get("reaction_time", {})
-        mv_data = data.get("movement", {})
-        tr_data = data.get("trajectory", {})
-        jt_data = data.get("jitter", {})
-        ck_data = data.get("click", {})
-        er_data = data.get("errors", {})
-        wu_data = data.get("warmup", {})
-        fg_data = data.get("fatigue", {})
-        mp_data = data.get("micro_pauses", {})
-        ep_data = data.get("endpoint_error", {})
+    def from_dict(cls, data: dict[str, Any]) -> "BehaviorConfig":
+        def build(typ, key):
+            value = data.get(key, {})
+            return typ(**value) if value else typ()
 
+        seed = data.get("seed")
         return cls(
             enabled=data.get("enabled", False),
-            seed=data.get("seed", 12345),
-            reaction_time=ReactionTimeConfig(**rt_data) if rt_data else ReactionTimeConfig(),
-            movement=MovementConfig(**mv_data) if mv_data else MovementConfig(),
-            trajectory=TrajectoryConfig(**tr_data) if tr_data else TrajectoryConfig(),
-            jitter=JitterConfig(**jt_data) if jt_data else JitterConfig(),
-            click=ClickConfig(**ck_data) if ck_data else ClickConfig(),
-            errors=ErrorConfig(**er_data) if er_data else ErrorConfig(),
-            warmup=WarmupConfig(**wu_data) if wu_data else WarmupConfig(),
-            fatigue=FatigueConfig(**fg_data) if fg_data else FatigueConfig(),
-            micro_pauses=MicroPauseConfig(**mp_data) if mp_data else MicroPauseConfig(),
-            endpoint_error=EndpointErrorConfig(**ep_data) if ep_data else EndpointErrorConfig(),
+            seed=int(seed) if seed is not None else None,
+            reaction_time=build(ReactionTimeConfig, "reaction_time"),
+            movement=build(MovementConfig, "movement"),
+            trajectory=build(TrajectoryConfig, "trajectory"),
+            jitter=build(JitterConfig, "jitter"),
+            click=build(ClickConfig, "click"),
+            errors=build(ErrorConfig, "errors"),
+            warmup=build(WarmupConfig, "warmup"),
+            fatigue=build(FatigueConfig, "fatigue"),
+            micro_pauses=build(MicroPauseConfig, "micro_pauses"),
+            endpoint_error=build(EndpointErrorConfig, "endpoint_error"),
+            human_profile=build(HumanProfileConfig, "human_profile"),
         )
