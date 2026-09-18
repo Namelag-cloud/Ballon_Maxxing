@@ -117,6 +117,14 @@ class TestBehavioralReplayValidation(unittest.TestCase):
         self.assertTrue(model.should_abandon_balloon_g())
         self.assertTrue(model.should_select_gemini_without_notification())
 
+
+    def test_twin_action_is_not_treated_as_balloon_action(self):
+        from game_profiles.balloon_types import BalloonAction, BalloonColor, BalloonType, TwinAction
+        first = BalloonAction(target_id=1, position=(10,10), target_width=20, target_type=BalloonType.NORMAL, color=BalloonColor.RED)
+        second = BalloonAction(target_id=2, position=(30,30), target_width=20, target_type=BalloonType.NORMAL, color=BalloonColor.BLUE)
+        twin = TwinAction(targets=(first, second))
+        self.assertFalse(isinstance(twin, BalloonAction))
+
     def test_scheduler_uses_behavioral_endpoint_not_center(self):
         scheduler = ActionScheduler()
         action = make_action(123.4, 234.6)
