@@ -9,6 +9,7 @@ from game_profiles.balloon_types import BalloonAction, TwinAction
 from input.coordinates import frame_to_screen
 from telemetry.outcome import SessionOutcome
 from telemetry.timing import now_monotonic
+from diagnostics.downstream import DownstreamDiagnostic
 
 
 class PairInputBackend(Protocol):
@@ -35,12 +36,13 @@ class BalloonExecutionResult:
 class BalloonExecutor:
     """Execute visible decisions through the stochastic behavioral model."""
 
-    def __init__(self, behavior: BehavioralModel, clock=None, initial_mouse_position=(0, 0)) -> None:
+    def __init__(self, behavior: BehavioralModel, clock=None, initial_mouse_position=(0, 0), diagnostic: DownstreamDiagnostic | None = None) -> None:
         self._clock = clock or now_monotonic
         self._behavior = behavior
-        self._primary_scheduler = ActionScheduler(clock=clock)
-        self._twin_scheduler = TwinActionScheduler(clock=clock)
-        self._g_scheduler = ActionScheduler(clock=clock)
+        self._diagnostic = diagnostic
+        self._primary_scheduler = ActionScheduler(clock=clock, diagnostic=diagnostic)
+        self._twin_scheduler = TwinActionScheduler(clock=clock, diagnostic=diagnostic)
+        self._g_scheduler = ActionScheduler(clock=clock, diagnostic=diagnostic)
         self._current_mouse = initial_mouse_position
         self._active_primary: BalloonAction | TwinAction | None = None
         self._latest_g: BalloonAction | None = None
@@ -73,6 +75,8 @@ class BalloonExecutor:
     def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=(), multicolor_specials=(), duration_s=None) -> BalloonExecutionResult:
         now = self._clock()
         self._g_visible = g_action is not None
+        if self._diagnostic:
+            self._diagnostic.log("executor_frame", now=now, actions=[self._action_info(a) for a in actions], g_action=self._action_info(g_action), notifications=[self._action_info(a) for a in notifications], multicolor_specials=[self._action_info(a) for a in multicolor_specials], input_enabled=input_enabled, active_primary=self._active_info(self._primary_scheduler.active_action), active_twin=self._active_twin_info(), active_g=self._active_info(self._g_scheduler.active_action), idle_until=self._idle_until)
         if g_action is None:
             self._g_decision_target_id = None
             self._g_should_execute = True
@@ -81,6 +85,8 @@ class BalloonExecutor:
             self._g_should_execute = not getattr(self._behavior, "should_abandon_balloon_g", lambda: False)()
         actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
         self._latest_g = g_action
+        if self._diagnostic:
+            self._diagnostic.log("behavior_gate", gate="new_action", allowed=actions_allowed, **self._behavior_gate_state(duration_s))
 
         clicks = 0
         input_timestamp = None
@@ -105,6 +111,8 @@ class BalloonExecutor:
                 ):
                     self._g_scheduler.cancel()
 
+        if self._g_visible and self._diagnostic:
+            self._diagnostic.log("action_start_attempt", lane="g", target=self._action_info(self._latest_g), accepted=self._g_should_execute and self._g_scheduler.is_idle and input_enabled and actions_allowed, reason=self._g_start_block_reason(input_enabled, actions_allowed))
         if self._g_visible and self._g_should_execute and self._g_scheduler.is_idle and input_enabled and actions_allowed:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
@@ -121,15 +129,43 @@ class BalloonExecutor:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
         actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
+        if self._diagnostic:
+            self._diagnostic.log("executor_gate", idle_gap_open=now >= self._idle_until, idle_until=self._idle_until, primary_idle=self._primary_scheduler.is_idle, twin_idle=self._twin_scheduler.is_idle, actions_allowed=actions_allowed, input_enabled=input_enabled)
+        if self._diagnostic and (actions or notifications or multicolor_specials) and not (now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed):
+            reasons = []
+            if now < self._idle_until:
+                reasons.append("idle_gap")
+            if not self._twin_scheduler.is_idle:
+                reasons.append("twin_scheduler_busy")
+            if not self._primary_scheduler.is_idle:
+                reasons.append("primary_scheduler_busy")
+            if not actions_allowed:
+                reasons.append("behavioral_start_gate")
+            if not input_enabled:
+                reasons.append("input_disabled")
+            self._diagnostic.log("action_start_attempt", lane="primary_or_twin", target=None, accepted=False, reason=reasons)
         if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed:
             if input_enabled:
                 action = None
+                gemini_gate_result = None
+                notification_gate_result = None
                 if notifications and multicolor_specials:
                     action = multicolor_specials[0]
-                elif notifications and getattr(self._behavior, "should_click_notification", lambda: False)():
-                    action = notifications[0]
-                elif multicolor_specials and getattr(self._behavior, "should_select_gemini_without_notification", lambda: False)():
-                    action = multicolor_specials[0]
+                    gemini_gate_result = True
+                    if self._diagnostic:
+                        self._diagnostic.log("gemini_gate", candidate_count=len(multicolor_specials), notification_count=len(notifications), selected=True, reason="notification_present")
+                elif notifications:
+                    notification_gate_result = getattr(self._behavior, "should_click_notification", lambda: False)()
+                    if notification_gate_result:
+                        action = notifications[0]
+                    if self._diagnostic:
+                        self._diagnostic.log("notification_gate", candidate_count=len(notifications), selected=notification_gate_result, reason="behavioral_notification_gate")
+                elif multicolor_specials:
+                    gemini_gate_result = getattr(self._behavior, "should_select_gemini_without_notification", lambda: False)()
+                    if gemini_gate_result:
+                        action = multicolor_specials[0]
+                    if self._diagnostic:
+                        self._diagnostic.log("gemini_gate", candidate_count=len(multicolor_specials), notification_count=0, selected=gemini_gate_result, reason="behavioral_gemini_without_notification_probability")
                 elif actions:
                     action = actions[0]
                 if isinstance(action, BalloonAction) and action.target_type.value == "special_sequence_balloon":
@@ -138,6 +174,10 @@ class BalloonExecutor:
                         self._special_should_execute = not getattr(self._behavior, "should_fail_super_g", lambda: False)()
                     if not self._special_should_execute:
                         action = None
+                if action is not None and self._diagnostic:
+                    self._diagnostic.log("action_start_attempt", lane="primary_or_twin", target=self._action_info(action), accepted=True, reason=None)
+                elif action is None and self._diagnostic:
+                    self._diagnostic.log("action_start_attempt", lane="primary_or_twin", target=None, accepted=False, reason="no_selectable_action_or_behavioral_special_failure")
                 if action is not None:
                     if isinstance(action, TwinAction):
                         self._start_twin(action, region_left, region_top)
@@ -161,7 +201,10 @@ class BalloonExecutor:
                     outcomes.append(self._make_outcome(first_a.behavioral_action, twin_completion.first, first_a.target_x, first_a.target_y, first_b.target_type.value, twin_completion.click_down_delta_ms, first_b.target_id))
                     outcomes.append(self._make_outcome(second_a.behavioral_action, twin_completion.second, second_a.target_x, second_a.target_y, second_b.target_type.value, twin_completion.click_down_delta_ms, second_b.target_id))
             self._active_primary = None
-            self._idle_until = self._clock() + (self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0)
+            idle_gap = self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0
+            self._idle_until = self._clock() + idle_gap
+            if self._diagnostic:
+                self._diagnostic.log("action_complete", lane="twin", idle_gap_s=idle_gap, idle_until=self._idle_until)
 
         primary_completion = self._primary_scheduler.tick(input_backend)
         if primary_completion is not None:
@@ -175,7 +218,10 @@ class BalloonExecutor:
                     outcomes.append(self._make_outcome(active.behavioral_action, primary_completion, active.target_x, active.target_y, completed_primary_action.target_type.value, target_id=completed_primary_action.target_id))
             self._active_primary = None
             self._primary_scheduler.clear()
-            self._idle_until = self._clock() + (self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0)
+            idle_gap = self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0
+            self._idle_until = self._clock() + idle_gap
+            if self._diagnostic:
+                self._diagnostic.log("action_complete", lane="primary", target=self._action_info(completed_primary_action), idle_gap_s=idle_gap, idle_until=self._idle_until)
 
         return BalloonExecutionResult(
             clicks_sent=clicks,
@@ -288,6 +334,64 @@ class BalloonExecutor:
             gemini_completed=None,
             observation_notes=["UNOBSERVABLE THROUGH CURRENT INTERFACE: authoritative spawnTick/popTick/hit state; click tick is a relative estimate from first-seen"],
         )
+
+    def _behavior_gate_state(self, duration_s):
+        if not isinstance(self._behavior, BehavioralModel):
+            return {}
+        elapsed = self._behavior.session_elapsed_s()
+        cutoff = self._behavior.activity_cutoff_s()
+        deadline = None if not duration_s or duration_s <= 0 else duration_s - cutoff
+        return {
+            "session_started": self._behavior._session_started,
+            "session_elapsed_s": elapsed,
+            "start_delay_s": self._behavior.start_delay_s,
+            "actions_ready": self._behavior.actions_ready(),
+            "activity_cutoff_s": cutoff,
+            "final_activity_deadline_s": deadline,
+            "final_activity_cutoff_active": bool(deadline is not None and elapsed >= deadline),
+        }
+
+    def _g_start_block_reason(self, input_enabled, actions_allowed):
+        if not self._g_should_execute:
+            return "behavioral_g_abandon"
+        if not self._g_scheduler.is_idle:
+            return "g_scheduler_busy"
+        if not input_enabled:
+            return "input_disabled"
+        if not actions_allowed:
+            return "behavioral_start_gate"
+        return None
+
+    @staticmethod
+    def _action_info(action):
+        if action is None:
+            return None
+        if isinstance(action, TwinAction):
+            return {"type": "TwinAction", "targets": [BalloonExecutor._action_info(t) for t in action.targets]}
+        return {
+            "type": action.target_type.value,
+            "id": action.target_id,
+            "color": action.color.value if action.color else None,
+            "position": list(action.position),
+            "width": action.target_width,
+        }
+
+    def _active_info(self, active):
+        if active is None:
+            return None
+        return {
+            "phase": active.phase.name,
+            "target_x": active.target_x,
+            "target_y": active.target_y,
+            "intended_target_x": active.intended_target_x,
+            "intended_target_y": active.intended_target_y,
+        }
+
+    def _active_twin_info(self):
+        active = self._twin_scheduler.active_actions
+        if active is None:
+            return None
+        return [{"phase": a.phase.name, "target_x": a.target_x, "target_y": a.target_y} for a in active]
 
     @staticmethod
     def _to_screen(position, region_left, region_top):

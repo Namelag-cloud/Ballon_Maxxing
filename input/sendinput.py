@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import time
 from ctypes import wintypes
+from typing import Any
 
 from input.base import InputBackend
 from input.coordinates import VirtualScreen, screen_to_sendinput
@@ -42,9 +43,10 @@ def _make_input(dx: int, dy: int, flags: int) -> INPUT:
 
 
 class SendInputBackend(InputBackend):
-    def __init__(self, debug_logging: bool = False) -> None:
+    def __init__(self, debug_logging: bool = False, diagnostic: Any = None) -> None:
         self._virtual = VirtualScreen()
         self._debug_logging = debug_logging
+        self._diagnostic = diagnostic
         self._last_x = self._virtual.left + self._virtual.width // 2
         self._last_y = self._virtual.top + self._virtual.height // 2
 
@@ -53,10 +55,9 @@ class SendInputBackend(InputBackend):
         return self._virtual
 
     def click_screen(self, screen_x: int, screen_y: int) -> float:
-        move_ts = self.move_to(screen_x, screen_y)
-        down_ts = self.left_down()
-        up_ts = self.left_up()
-        return up_ts
+        self.move_to(screen_x, screen_y)
+        self.left_down()
+        return self.left_up()
 
     def move_to(self, screen_x: int, screen_y: int) -> float:
         norm_x, norm_y = screen_to_sendinput(
@@ -66,26 +67,41 @@ class SendInputBackend(InputBackend):
         move = _make_input(norm_x, norm_y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)
         inputs = (INPUT * 1)(move)
         sent = user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        ts = time.perf_counter_ns() / 1e9
         if sent != 1:
+            if self._diagnostic:
+                self._diagnostic.log("sendinput_dispatch_error", kind="move", x=screen_x, y=screen_y, sent=sent)
             raise RuntimeError(f"SendInput move dispatch incomplete: sent {sent}/1")
         self._last_x, self._last_y = int(screen_x), int(screen_y)
-        return time.perf_counter_ns() / 1e9
+        if self._diagnostic:
+            self._diagnostic.log("sendinput_move", x=screen_x, y=screen_y, sent=sent)
+        return ts
 
     def left_down(self) -> float:
         down = _make_input(0, 0, MOUSEEVENTF_LEFTDOWN)
         inputs = (INPUT * 1)(down)
         sent = user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        ts = time.perf_counter_ns() / 1e9
         if sent != 1:
+            if self._diagnostic:
+                self._diagnostic.log("sendinput_dispatch_error", kind="mouse_down", sent=sent)
             raise RuntimeError(f"SendInput left-down dispatch incomplete: sent {sent}/1")
-        return time.perf_counter_ns() / 1e9
+        if self._diagnostic:
+            self._diagnostic.log("sendinput_mouse_down", sent=sent, x=self._last_x, y=self._last_y)
+        return ts
 
     def left_up(self) -> float:
         up = _make_input(0, 0, MOUSEEVENTF_LEFTUP)
         inputs = (INPUT * 1)(up)
         sent = user32.SendInput(1, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        ts = time.perf_counter_ns() / 1e9
         if sent != 1:
+            if self._diagnostic:
+                self._diagnostic.log("sendinput_dispatch_error", kind="mouse_up", sent=sent)
             raise RuntimeError(f"SendInput left-up dispatch incomplete: sent {sent}/1")
-        return time.perf_counter_ns() / 1e9
+        if self._diagnostic:
+            self._diagnostic.log("sendinput_mouse_up", sent=sent, x=self._last_x, y=self._last_y)
+        return ts
 
     def click_pair(
         self,
@@ -93,11 +109,6 @@ class SendInputBackend(InputBackend):
         second: tuple[int, int],
         inter_click_delay_s: float = 0.0,
     ) -> tuple[float, float, float, float]:
-        """Dispatch two complete clicks as individual OS operations.
-
-        Unlike the old six-event batch, each click has independently measured
-        move/down/up timestamps. This makes the inter-click interval observable.
-        """
         self.move_to(*first)
         first_down = self.left_down()
         first_up = self.left_up()

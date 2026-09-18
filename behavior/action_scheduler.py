@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from behavior.model import BehavioralAction
 from telemetry.timing import now_monotonic
@@ -69,8 +69,9 @@ class InputBackend(Protocol):
 
 
 class ActionScheduler:
-    def __init__(self, clock=None) -> None:
+    def __init__(self, clock=None, diagnostic: Any = None) -> None:
         self._clock = clock or now_monotonic
+        self._diagnostic = diagnostic
         self._active: Optional[ActiveAction] = None
         self._completed_history: list[ActionTimestamps] = []
 
@@ -88,6 +89,8 @@ class ActionScheduler:
 
     def start_action(self, behavioral_action: BehavioralAction, target_x: int, target_y: int) -> None:
         if not self.is_idle:
+            if self._diagnostic:
+                self._diagnostic.log("scheduler_start_blocked", scheduler="primary", phase=self._active.phase.name if self._active else None)
             return
         now = self._clock()
         action = ActiveAction(
@@ -106,6 +109,8 @@ class ActionScheduler:
         action.timestamps.action_planned = now
         action.timestamps.reaction_start = now
         self._active = action
+        if self._diagnostic:
+            self._diagnostic.log("scheduler_start", scheduler="primary", phase=action.phase.name, target_x=action.target_x, target_y=action.target_y, intended_target_x=action.intended_target_x, intended_target_y=action.intended_target_y)
 
     def tick(self, input_backend: InputBackend) -> Optional[ActionTimestamps]:
         if self._active is None:
@@ -119,6 +124,8 @@ class ActionScheduler:
                 action.timestamps.movement_start = now
                 action.phase = ActionPhase.MOVING
                 action.trajectory_index = 0
+                if self._diagnostic:
+                    self._diagnostic.log("scheduler_phase", scheduler="primary", phase=action.phase.name)
                 return None
 
         if action.phase == ActionPhase.MOVING:
@@ -126,6 +133,8 @@ class ActionScheduler:
                 action.timestamps.movement_end = now
                 input_backend.move_to(action.target_x, action.target_y)
                 action.phase = ActionPhase.CLICK_DOWN
+                if self._diagnostic:
+                    self._diagnostic.log("scheduler_phase", scheduler="primary", phase=action.phase.name)
             else:
                 self._tick_trajectory(action, input_backend, now)
             if action.phase == ActionPhase.CLICK_DOWN:
@@ -134,6 +143,8 @@ class ActionScheduler:
         if action.phase == ActionPhase.CLICK_DOWN:
             action.timestamps.click_down = input_backend.left_down()
             action.phase = ActionPhase.CLICK_HOLD
+            if self._diagnostic:
+                self._diagnostic.log("scheduler_phase", scheduler="primary", phase=action.phase.name)
 
         if action.phase == ActionPhase.CLICK_HOLD:
             if self._clock() - action.timestamps.click_down >= action.click_duration_s:
@@ -141,6 +152,8 @@ class ActionScheduler:
                 action.timestamps.action_complete = self._clock()
                 action.phase = ActionPhase.COMPLETE
                 self._completed_history.append(action.timestamps)
+                if self._diagnostic:
+                    self._diagnostic.log("scheduler_phase", scheduler="primary", phase=action.phase.name)
                 return action.timestamps
         return None
 
@@ -168,6 +181,8 @@ class ActionScheduler:
         self._completed_history.append(action.timestamps)
         timestamps = action.timestamps
         self._active = None
+        if self._diagnostic:
+            self._diagnostic.log("scheduler_cancel", scheduler="primary")
         return timestamps
 
     def force_complete(self) -> Optional[ActionTimestamps]:
@@ -175,6 +190,8 @@ class ActionScheduler:
 
     def clear(self) -> None:
         self._active = None
+        if self._diagnostic:
+            self._diagnostic.log("scheduler_clear", scheduler="primary")
 
 
 class PairInputBackend(Protocol):
@@ -198,8 +215,9 @@ class TwinActionCompletion:
 class TwinActionScheduler:
     """Coordinate two behavioral plans while preserving a measurable delay."""
 
-    def __init__(self, clock=None) -> None:
+    def __init__(self, clock=None, diagnostic: Any = None) -> None:
         self._clock = clock or now_monotonic
+        self._diagnostic = diagnostic
         self._active: tuple[ActiveAction, ActiveAction] | None = None
         self._max_click_delta_ms = 500.0
         self._inter_click_delay_s = 0.0
@@ -219,6 +237,8 @@ class TwinActionScheduler:
         inter_click_delay_s: float = 0.0,
     ) -> None:
         if not self.is_idle:
+            if self._diagnostic:
+                self._diagnostic.log("scheduler_start_blocked", scheduler="twin", phase=[a.phase.name for a in self._active] if self._active else None)
             return
         now = self._clock()
         first = ActiveAction(
@@ -238,6 +258,8 @@ class TwinActionScheduler:
         self._max_click_delta_ms = max_click_delta_ms
         self._inter_click_delay_s = max(0.0, inter_click_delay_s)
         self._active = (first, second)
+        if self._diagnostic:
+            self._diagnostic.log("scheduler_start", scheduler="twin", phase=[first.phase.name, second.phase.name], targets=[[first.target_x, first.target_y], [second.target_x, second.target_y]])
 
     def tick(self, input_backend: PairInputBackend) -> TwinActionCompletion | None:
         if self._active is None:
@@ -281,6 +303,8 @@ class TwinActionScheduler:
         second.timestamps.action_complete = second_up
         first.phase = ActionPhase.COMPLETE
         second.phase = ActionPhase.COMPLETE
+        if self._diagnostic:
+            self._diagnostic.log("scheduler_phase", scheduler="twin", phase=[first.phase.name, second.phase.name], click_down_delta_ms=delta_ms)
         return TwinActionCompletion(
             first.timestamps, second.timestamps, delta_ms,
             self._inter_click_delay_s * 1000.0,
@@ -288,6 +312,8 @@ class TwinActionScheduler:
 
     def clear(self) -> None:
         self._active = None
+        if self._diagnostic:
+            self._diagnostic.log("scheduler_clear", scheduler="twin")
 
     @staticmethod
     def _advance_reaction(action: ActiveAction, now: float) -> None:
