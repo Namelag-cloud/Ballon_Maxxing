@@ -20,11 +20,23 @@ class MSSCapture(CaptureBackend):
             "height": r.height,
         }
         self._sct = mss.MSS()
+        self._last_timing_ms = {"capture": 0.0, "numpy": 0.0}
+
+    @property
+    def last_timing_ms(self) -> dict[str, float]:
+        return dict(self._last_timing_ms)
 
     def grab(self) -> tuple[np.ndarray, float]:
+        t0 = time.perf_counter_ns()
         raw = self._sct.grab(self._monitor)
+        t1 = time.perf_counter_ns()
         arr = np.asarray(raw)[:, :, :3]
-        ts = time.perf_counter_ns() / 1e9
+        t2 = time.perf_counter_ns()
+        self._last_timing_ms = {
+            "capture": (t1 - t0) / 1e6,
+            "numpy": (t2 - t1) / 1e6,
+        }
+        ts = t2 / 1e9
         return arr, ts
 
     def close(self) -> None:
