@@ -109,7 +109,8 @@ class BalloonExecutor:
         if g_completion is not None and self._g_visible and input_enabled:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
-        if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle:
+        actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)() and getattr(self._behavior, "should_start_new_action", lambda _duration: True)(None)
+        if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed:
             if input_enabled and notifications and getattr(self._behavior, "should_click_notification", lambda: False)():
                 action = notifications[0]
                 self._start_single(self._primary_scheduler, action, region_left, region_top)
@@ -194,14 +195,16 @@ class BalloonExecutor:
         )
 
     def _plan(self, action: BalloonAction, target_x: int, target_y: int) -> BehavioralAction:
+        metadata = dict(action.metadata or {})
+        metadata["is_twin"] = action.is_twin
         return self._behavior.plan_action(
             current_x=float(self._current_mouse[0]),
             current_y=float(self._current_mouse[1]),
             target_x=float(target_x),
             target_y=float(target_y),
             target_width=float(action.target_width),
-            target_metadata=action.metadata,
-            acquisition_timestamp=action.metadata.get("first_seen_timestamp") if action.metadata else None,
+            target_metadata=metadata,
+            acquisition_timestamp=metadata.get("first_seen_timestamp"),
         )
 
     @staticmethod
@@ -218,26 +221,48 @@ class BalloonExecutor:
         duo_delta_ms: float | None = None,
     ) -> SessionOutcome:
         observed_reaction = None
+        estimated_click_tick = None
+        timing_error_ms = None
         if behavioral_action.acquisition_timestamp is not None and timestamps.click_down:
             observed_reaction = max(
                 0.0,
                 (timestamps.click_down - behavioral_action.acquisition_timestamp) / (1000.0 / 60.0),
             )
+            # This is a relative tick estimate from first-seen, not an engine tick.
+            estimated_click_tick = observed_reaction
+            timing_error_ms = (observed_reaction - behavioral_action.intended_reaction_ticks) * (1000.0 / 60.0)
+        scheduler_delay_ms = max(0.0, (timestamps.reaction_start - timestamps.action_planned) * 1000.0)
+        movement_duration_ms = max(0.0, (timestamps.movement_end - timestamps.movement_start) * 1000.0)
+        is_gemini = target_type == "multicolor_special"
         return SessionOutcome(
             target_type=target_type,
             target_first_seen_ts=behavioral_action.acquisition_timestamp,
             acquisition_ts=behavioral_action.acquisition_timestamp,
-            planned_dispatch_ts=behavioral_action.planned_at,
+            planned_dispatch_ts=timestamps.action_planned or behavioral_action.planned_at,
+            behavioral_planning_ts=behavioral_action.planned_at,
             dispatch_ts=timestamps.click_down or timestamps.click_up,
+            actual_click_down_ts=timestamps.click_down or None,
             estimated_reaction_ticks=observed_reaction,
-            timing_error_ms=((observed_reaction - behavioral_action.intended_reaction_ticks) * (1000.0 / 60.0)) if observed_reaction is not None else None,
+            estimated_acquisition_click_ticks=observed_reaction,
+            estimated_click_tick=estimated_click_tick,
+            click_tick_modulo=(int(round(estimated_click_tick)) % 3) if estimated_click_tick is not None else None,
+            timing_error_ms=timing_error_ms,
+            intended_vs_observed_timing_error_ms=timing_error_ms,
             screen_click_x=int(screen_x),
             screen_click_y=int(screen_y),
             endpoint_error_px=behavioral_action.endpoint_error_px,
+            target_radius_px=behavioral_action.target_width / 2.0,
             intended_reaction_ticks=behavioral_action.intended_reaction_ticks,
             intended_reaction_s=behavioral_action.reaction_time_s,
+            modeled_perception_ticks=behavioral_action.perception_ticks,
+            scheduler_delay_ms=scheduler_delay_ms,
+            movement_duration_ms=movement_duration_ms,
             duo_delta_ms=duo_delta_ms,
-            observation_notes=["UNOBSERVABLE THROUGH CURRENT INTERFACE: authoritative spawnTick/popTick/hit state"],
+            gemini_observed=is_gemini,
+            gemini_selected=is_gemini,
+            gemini_executed=(timestamps.click_down > 0),
+            gemini_completed=None,
+            observation_notes=["UNOBSERVABLE THROUGH CURRENT INTERFACE: authoritative spawnTick/popTick/hit state; click tick is a relative estimate from first-seen"],
         )
 
     @staticmethod
