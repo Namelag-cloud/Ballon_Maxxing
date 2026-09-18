@@ -123,8 +123,7 @@
       "enabled": true,
       "scale_px": 5.0,
       "max_px": 12.0,
-      "spatial_sigma_pct": 0.16,
-      "fat_finger_sigma_pct": 0.025
+      "spatial_sigma_pct": 0.16
     },
     "human_profile": {
       "enabled": true,
