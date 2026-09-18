@@ -38,6 +38,7 @@ class HumanProfile:
     fat_finger_probability: float = 0.02
     fat_finger_multiplier: float = 2.0
     gemini_without_notification_probability: float = 0.01
+    final_activity_cutoff_s: float = 1.5
 
     @classmethod
     def sample(cls, rng: SeededRNG, data: dict[str, Any] | None = None) -> "HumanProfile":
@@ -75,6 +76,7 @@ class HumanProfile:
             fat_finger_probability=float(cfg.get("fat_finger_probability", 0.02)),
             fat_finger_multiplier=float(cfg.get("fat_finger_multiplier", 2.0)),
             gemini_without_notification_probability=float(cfg.get("gemini_without_notification_probability", 0.01)),
+            final_activity_cutoff_s=float(cfg.get("final_activity_cutoff_s", 1.5)),
         )
 
     def as_dict(self) -> dict[str, float]:
