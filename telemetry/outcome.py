@@ -44,6 +44,7 @@ class SessionOutcome:
     special_sequence_outcome: Optional[str] = None
     balloon_g_outcome: Optional[str] = None
     feedback_confidence: float = 0.0
+    execution_status: str = "completed"
     observation_notes: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
