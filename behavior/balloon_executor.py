@@ -152,7 +152,7 @@ class BalloonExecutor:
                     outcomes.append(self._make_outcome(active.behavioral_action, primary_completion, active.target_x, active.target_y, completed_primary_action.target_type.value))
             self._active_primary = None
             self._primary_scheduler.clear()
-            self._idle_until = self._clock() + self._behavior.sample_idle_gap_s()
+            self._idle_until = self._clock() + (self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0)
 
         return BalloonExecutionResult(
             clicks_sent=clicks,
