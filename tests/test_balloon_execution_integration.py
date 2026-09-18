@@ -216,8 +216,9 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         ]).g_action
         self.assertIsNotNone(g1)
 
-        self.executor.tick(normal.actions, g1, self.input, 0, 0, True)
-        self.executor.tick(normal.actions, g1, self.input, 0, 0, True)
+        # Keep the first G action before its click phase so the position
+        # refresh exercises the contract's cancellation path rather than
+        # allowing an already-dispatched click to finish.
         self.executor.tick(normal.actions, g1, self.input, 0, 0, True)
 
         g2 = self.engine.decide([
@@ -229,10 +230,8 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         self.assertFalse(result.g_click_completed)
         self.assertEqual(self.executor.latest_g.position, (80, 90))
 
-        self.executor.tick([], g2, self.input, 0, 0, True)
-        self.executor.tick([], g2, self.input, 0, 0, True)
-        self.executor.tick([], g2, self.input, 0, 0, True)
-        result = self.executor.tick([], g2, self.input, 0, 0, True)
+        for _ in range(3):
+            result = self.executor.tick([], g2, self.input, 0, 0, True)
         self.assertTrue(result.g_click_completed)
         self.assertEqual(self.input.moves[-1][1:], (80, 90))
 
