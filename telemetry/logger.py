@@ -151,7 +151,13 @@ class TelemetryLogger:
             "avg_detections_per_frame": float(np.mean(detect_counts)),
             "action_timing": action_stats,
             "behavioral": asdict(self._behavioral.extract(len(detect_counts))),
-            "session": self._session_metadata,
+            "session": {
+                **self._session_metadata,
+                "duration_s": (
+                    max(0.0, self._frames[-1].capture_timestamp - self._frames[0].capture_timestamp)
+                    if len(self._frames) > 1 else 0.0
+                ),
+            },
             "outcomes_count": len(self._outcomes),
             "outcomes": [o.as_dict() for o in self._outcomes],
         }
