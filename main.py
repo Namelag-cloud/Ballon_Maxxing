@@ -25,6 +25,8 @@ from input.sendinput import SendInputBackend
 from input.coordinates import frame_to_screen
 from telemetry.logger import TelemetryLogger, FrameTelemetry
 from telemetry.timing import now_monotonic
+from telemetry.outcome import SessionOutcome
+from vision.feedback import FeedbackReader
 from debug.visualizer import DebugVisualizer
 from game_profiles.base import GameProfile, GameAction, GameType
 from game_profiles import get_profile
@@ -134,6 +136,8 @@ class Application:
         self._selector = TargetSelector(settings)
         self._input_backend = SendInputBackend() if settings.input.enabled else None
         self._telemetry = TelemetryLogger()
+        self._feedback_reader = FeedbackReader()
+        self._last_feedback = None
         self._visualizer = DebugVisualizer(settings)
 
         self._behavior = None
@@ -143,6 +147,11 @@ class Application:
         self._balloon_frame_decision = None
         if settings.behavior.enabled:
             self._behavior = BehavioralModel(settings.behavior)
+            self._telemetry.set_session_metadata(
+                behavioral_seed=self._behavior.behavioral_seed,
+                human_profile=self._behavior.profile.as_dict(),
+                feedback_signals="screen-only; unvalidated UI signals remain UNOBSERVABLE THROUGH CURRENT INTERFACE",
+            )
             self._action_scheduler = ActionScheduler()
             if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
                 self._balloon_executor = BalloonExecutor(self._behavior)
@@ -189,6 +198,7 @@ class Application:
         user32.UnhookWindowsHookEx(hook)
 
     def _process_frame(self, frame: np.ndarray):
+        self._last_feedback = self._feedback_reader.observe(frame, now_monotonic())
         if self._game_profile is not None:
             detections = self._game_profile.detect(frame)
             if self._balloon_decision is not None:
@@ -201,6 +211,8 @@ class Application:
                     observed = dict(track.metadata)
                     observed.update({
                         "target_id": track.id,
+                        "first_seen_timestamp": track.first_seen,
+                        "last_seen_timestamp": track.last_seen,
                         "center": track.position,
                         "bbox": track.bbox,
                         "color_name": track.color if track.color != "unknown" else observed.get("color_name"),
@@ -385,7 +397,8 @@ class Application:
         if self._game_profile:
             print(f"Game profile: {self._game_profile.name}")
         if self._behavior:
-            print(f"Behavioral model: enabled (seed={self._behavior.config.seed})")
+            print(f"Behavioral model: enabled (seed={self._behavior.behavioral_seed})")
+            print(f"Human profile: {self._behavior.profile.as_dict()}")
         print("F8 = Toggle click on/off | ESC = Emergency stop")
 
         if self._startup_delay > 0:
@@ -409,11 +422,15 @@ class Application:
 
         if self._behavior and not self._behavior._session_started:
             self._behavior.start_session()
+            print(f"Sampled behavioral start-delay parameter: {self._behavior.start_delay_s:.3f}s")
 
         try:
             while self._running:
                 if self._duration and (now_monotonic() - self._start_time) >= self._duration:
                     print(f"\nDuration limit reached ({self._duration}s)")
+                    break
+                if self._behavior and self._behavior.should_early_exit(self._duration):
+                    print("\nBehavioral model sampled an early session exit.")
                     break
 
                 t_start = now_monotonic()
@@ -454,6 +471,11 @@ class Application:
                         )
 
                     self._total_clicks += execution.clicks_sent
+                    for outcome in execution.outcomes:
+                        if self._last_feedback is not None:
+                            outcome.feedback_confidence = self._last_feedback.confidence
+                            outcome.observation_notes.extend(self._last_feedback.notes)
+                        self._telemetry.record_outcome(outcome)
 
                 elif self._behavior and self._action_scheduler:
                     completed = self._action_scheduler.tick(self._input_backend)
