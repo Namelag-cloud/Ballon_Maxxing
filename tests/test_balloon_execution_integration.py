@@ -271,7 +271,9 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         ]).actions
 
         self.executor.tick(action, None, self.input, 0, 0, True)
-        self.assertEqual(self.input.downs, [0.0])
+        self.clock.value = 0.1
+        self.executor.tick(action, None, self.input, 0, 0, True)
+        self.assertEqual(self.input.downs, [0.1])
         self.assertEqual(self.input.ups, [])
 
         outcomes = self.executor.shutdown(self.input)
