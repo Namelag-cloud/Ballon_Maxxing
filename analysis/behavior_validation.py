@@ -112,6 +112,7 @@ def summarize(rows):
     durations = values(rows, "_session_duration_s")
     modulo = values(rows, "click_tick_modulo")
 
+    modulo_distribution = {str(i): modulo.count(float(i)) for i in range(3)}
     result = {
         "reaction_interval_ticks": {**numeric_stats(reaction), "iqr": iqr(reaction)},
         "spatial_error_px": {**numeric_stats(spatial), "iqr": iqr(spatial)},
@@ -120,7 +121,7 @@ def summarize(rows):
         },
         "duo_delay_ms": {**numeric_stats(duo), "iqr": iqr(duo)},
         "session_duration_s": {**numeric_stats(durations), "iqr": iqr(durations)},
-        "click_tick_modulo_3": {**numeric_stats(modulo), "iqr": iqr(modulo)},
+        "click_tick_modulo_3": {**numeric_stats(modulo), "iqr": iqr(modulo), "distribution": modulo_distribution},
         "lag1_reaction_autocorrelation": lag1_autocorrelation(reaction),
         "intended_vs_observed_timing_error_ms": {
             **numeric_stats(timing_error), "iqr": iqr(timing_error)
