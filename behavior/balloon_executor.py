@@ -69,6 +69,7 @@ class BalloonExecutor:
     def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=()) -> BalloonExecutionResult:
         now = self._clock()
         self._g_visible = g_action is not None
+        actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)()
         self._latest_g = g_action
 
         clicks = 0
@@ -94,7 +95,7 @@ class BalloonExecutor:
                 ):
                     self._g_scheduler.cancel()
 
-        if self._g_visible and self._g_scheduler.is_idle and input_enabled:
+        if self._g_visible and self._g_scheduler.is_idle and input_enabled and actions_allowed:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
         g_completion = self._g_scheduler.tick(input_backend) if self._g_scheduler.active_action else None
