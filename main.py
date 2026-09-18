@@ -466,6 +466,7 @@ class Application:
                         region.top,
                         self._input_enabled,
                         self._balloon_frame_decision.notifications if new_actions_allowed else (),
+                        self._balloon_frame_decision.multicolor_specials if new_actions_allowed else (),
                     )
                     clicks_this_frame = execution.clicks_sent
                     if execution.input_timestamp is not None:
