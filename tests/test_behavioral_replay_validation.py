@@ -119,8 +119,8 @@ class TestBehavioralReplayValidation(unittest.TestCase):
 
 
     def test_twin_action_is_not_treated_as_balloon_action(self):
-        from game_profiles.balloon_types import BalloonAction, BalloonColor, BalloonType, TwinAction
-        first = BalloonAction(target_id=1, position=(10,10), target_width=20, target_type=BalloonType.NORMAL, color=BalloonColor.RED)
+        from game_profiles.balloon_types import BalloonAction, BalloonColor, TargetType, TwinAction
+        first = BalloonAction(target_id=1, position=(10,10), target_width=20, target_type=TargetType.NORMAL_BALLOON, color=BalloonColor.RED)
         second = BalloonAction(target_id=2, position=(30,30), target_width=20, target_type=BalloonType.NORMAL, color=BalloonColor.BLUE)
         twin = TwinAction(targets=(first, second))
         self.assertFalse(isinstance(twin, BalloonAction))
