@@ -40,12 +40,16 @@ def load_rows(paths):
         path = Path(path)
         if path.suffix.lower() == ".json":
             data = json.loads(path.read_text())
-            rows.extend(data.get("outcomes", []))
+            duration = data.get("session", {}).get("duration_s")
+            for outcome in data.get("outcomes", []):
+                row = dict(outcome)
+                if duration is not None:
+                    row["_session_duration_s"] = duration
+                rows.append(row)
         else:
             with open(path, newline="") as f:
                 rows.extend(csv.DictReader(f))
     return rows
-
 
 def values(rows, key):
     result = []
@@ -59,27 +63,85 @@ def values(rows, key):
     return result
 
 
-def summarize(rows):
-    mapping = {
-        "reaction_interval_ticks": "estimated_reaction_ticks",
-        "spatial_error_radius": "endpoint_error_px",
-        "duo_delta_ms": "duo_delta_ms",
-        "click_tick_modulo": "click_tick_modulo",
-        "timing_error_ms": "timing_error_ms",
-    }
-    result = {}
-    for metric, key in mapping.items():
-        vals = values(rows, key)
-        stats = numeric_stats(vals)
-        stats["iqr"] = iqr(vals)
-        result[metric] = stats
-
-    for metric, key in (("hit_rate", "hit"), ("miss_rate", "miss"), ("notification_rate", "notification")):
-        vals = values(rows, key)
-        result[metric] = {"count": len(vals), "mean": mean(vals) if vals else None}
-
+def binary_values(rows, key):
+    result = []
+    for row in rows:
+        value = row.get(key)
+        if isinstance(value, bool):
+            result.append(float(value))
+        elif isinstance(value, (int, float)):
+            result.append(float(value))
+        elif isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1"}:
+                result.append(1.0)
+            elif normalized in {"false", "0"}:
+                result.append(0.0)
     return result
 
+
+def lag1_autocorrelation(values):
+    if len(values) < 3:
+        return None
+    x = [float(v) for v in values[:-1]]
+    y = [float(v) for v in values[1:]]
+    mx, my = mean(x), mean(y)
+    num = sum((a - mx) * (b - my) for a, b in zip(x, y))
+    denx = sum((a - mx) ** 2 for a in x)
+    deny = sum((b - my) ** 2 for b in y)
+    return num / math.sqrt(denx * deny) if denx and deny else None
+
+
+def summarize(rows):
+    reaction = values(rows, "estimated_acquisition_click_ticks")
+    spatial = values(rows, "endpoint_error_px")
+    radii = values(rows, "target_radius_px")
+    normalized_spatial = [
+        error / radius for error, radius in zip(spatial, radii) if radius > 0
+    ]
+    duo = values(rows, "duo_delta_ms")
+    timing_error = values(rows, "intended_vs_observed_timing_error_ms")
+    durations = values(rows, "_session_duration_s")
+    modulo = values(rows, "click_tick_modulo")
+
+    result = {
+        "reaction_interval_ticks": {**numeric_stats(reaction), "iqr": iqr(reaction)},
+        "spatial_error_px": {**numeric_stats(spatial), "iqr": iqr(spatial)},
+        "spatial_error_normalized_by_target_radius": {
+            **numeric_stats(normalized_spatial), "iqr": iqr(normalized_spatial)
+        },
+        "duo_delay_ms": {**numeric_stats(duo), "iqr": iqr(duo)},
+        "session_duration_s": {**numeric_stats(durations), "iqr": iqr(durations)},
+        "click_tick_modulo_3": {**numeric_stats(modulo), "iqr": iqr(modulo)},
+        "lag1_reaction_autocorrelation": lag1_autocorrelation(reaction),
+        "intended_vs_observed_timing_error_ms": {
+            **numeric_stats(timing_error), "iqr": iqr(timing_error)
+        },
+    }
+
+    for metric, key in (("hit_rate", "hit"), ("miss_rate", "miss"), ("notification_rate", "notification")):
+        vals = binary_values(rows, key)
+        result[metric] = {"count": len(vals), "mean": mean(vals) if vals else None}
+
+    if not reaction:
+        result["reaction_interval_ticks"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+    if not normalized_spatial:
+        result["spatial_error_normalized_by_target_radius"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+    if not duo:
+        result["duo_delay_ms"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+    if not binary_values(rows, "hit"):
+        result["hit_rate"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+        result["miss_rate"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+    if not binary_values(rows, "notification"):
+        result["notification_rate"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+    if not durations:
+        result["session_duration_s"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+    if not modulo:
+        result["click_tick_modulo_3"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+    if not timing_error:
+        result["intended_vs_observed_timing_error_ms"]["observability"] = "UNOBSERVABLE THROUGH CURRENT INTERFACE"
+
+    return result
 
 def ks_distance(a, b):
     a, b = sorted(a), sorted(b)
