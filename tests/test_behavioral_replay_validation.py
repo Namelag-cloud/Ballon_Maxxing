@@ -130,5 +130,30 @@ def test_entropy_default_and_explicit_seed_are_distinct_modes():
     from behavior.model import BehavioralModel
     ma = BehavioralModel(a)
     mb = BehavioralModel(b)
-    assert ma.behavioral_seed != mb.behavioral_seed or ma.behavioral_seed == mb.behavioral_seed
+    assert ma.behavioral_seed != mb.behavioral_seed
     assert ma.profile.start_delay_sec > 0
+
+
+def test_explicit_behavioral_seed_is_reproducible():
+    from behavior.model import BehavioralModel
+    cfg = BehaviorConfig(enabled=True, seed=777)
+    a = BehavioralModel(cfg)
+    b = BehavioralModel(cfg)
+    assert a.behavioral_seed == b.behavioral_seed
+    assert a.profile.as_dict() == b.profile.as_dict()
+
+
+def test_miss_endpoint_is_outside_target_radius():
+    from behavior.model import BehavioralModel
+    from behavior.config import ErrorConfig, HumanProfileConfig
+    cfg = BehaviorConfig(
+        enabled=True,
+        seed=777,
+        errors=ErrorConfig(enabled=True, miss_probability=1.0),
+        human_profile=HumanProfileConfig(
+            miss_rate_min=1.0, miss_rate_max=1.0
+        ),
+    )
+    action = BehavioralModel(cfg).plan_action(0, 0, 100, 100, 40)
+    assert action.is_miss
+    assert action.endpoint_error_px >= 1.5 * 20.0
