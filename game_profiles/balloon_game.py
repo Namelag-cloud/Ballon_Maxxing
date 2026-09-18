@@ -111,6 +111,7 @@ class BalloonGameProfile(GameProfile):
             "hough_call_count": 0,
             "component_count": 0,
             "candidate_counts": {"blue": 0, "red": 0, "yellow": 0, "green": 0},
+            "candidate_geometry": [],
             "ring_circles_returned": 0,
         }
 
@@ -428,6 +429,23 @@ class BalloonGameProfile(GameProfile):
             ):
                 continue
 
+            # Keep a small geometry sample for diagnosing false positives. This
+            # records only components that reach the normal-balloon candidate
+            # boundary, so it does not materially expand the hot path.
+            if len(self._last_profile["candidate_geometry"]) < 32:
+                self._last_profile["candidate_geometry"].append({
+                    "color": color_name,
+                    "bbox": (x, y, w, h),
+                    "width": w,
+                    "height": h,
+                    "aspect_ratio": float(w) / float(h),
+                    "area": area,
+                    "fill_ratio": float(fill_ratio),
+                    "circularity": float(circularity),
+                    "solidity": float(solidity),
+                    "hole_ratio": float(hole_ratio),
+                })
+
             classification_t0 = time.perf_counter()
             color_name_detected, confidence = self._classifier.classify_mask(
                 hsv[y:y + h, x:x + w], component_mask
@@ -437,7 +455,12 @@ class BalloonGameProfile(GameProfile):
             if color_name_detected != color_name or confidence < self._settings.detection.min_confidence:
                 continue
 
-            visual = self._visual_features(hsv, component_mask, (x, y, w, h))
+            visual = self._visual_features(
+                hsv,
+                (x, y, w, h),
+                circularity=circularity,
+                solidity=solidity,
+            )
             detections.append(
                 TargetDetection(
                     target_type=TargetType.NORMAL_BALLOON,
@@ -536,22 +559,13 @@ class BalloonGameProfile(GameProfile):
     def _visual_features(
         self,
         hsv: np.ndarray,
-        component_mask: np.ndarray,
         bbox: tuple[int, int, int, int],
+        *,
+        circularity: float,
+        solidity: float,
     ) -> VisualFeatures:
-        contour_list, _ = cv2.findContours(
-            component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-        circularity = 0.0
-        solidity = 0.0
-        if contour_list:
-            contour = max(contour_list, key=cv2.contourArea)
-            perimeter = cv2.arcLength(contour, True)
-            area = cv2.contourArea(contour)
-            circularity = 4.0 * np.pi * area / (perimeter * perimeter) if perimeter else 0.0
-            hull_area = cv2.contourArea(cv2.convexHull(contour))
-            solidity = area / hull_area if hull_area else 0.0
-
+        # circularity/solidity were already computed during component
+        # acceptance. Reuse them instead of running a second contour pass.
         outline = self._outline.detect(hsv, bbox)
         return VisualFeatures(
             circularity=float(circularity),

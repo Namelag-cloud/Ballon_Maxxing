@@ -68,10 +68,12 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             "hough_call_count",
             "component_count",
             "candidate_counts",
+            "candidate_geometry",
             "ring_circles_returned",
         }
         self.assertTrue(required.issubset(first_profile))
         self.assertTrue(required.issubset(second_profile))
+        self.assertEqual(first_profile["candidate_geometry"], second_profile["candidate_geometry"])
 
         timing_keys = required - {"candidate_counts", "normal_candidate_count", "ring_call_count", "hough_call_count", "component_count", "ring_circles_returned"}
         for key in timing_keys:
@@ -117,6 +119,11 @@ class BalloonVisionProfilingTests(unittest.TestCase):
                 for d in detections
             )
         )
+        geometry = profile.last_profile["candidate_geometry"]
+        self.assertTrue(any(g["color"] == "red" for g in geometry))
+        candidate = next(g for g in geometry if g["color"] == "red")
+        self.assertEqual(candidate["width"], candidate["height"])
+        self.assertGreater(candidate["circularity"], 0.45)
 
     def test_ring_profile_fields_and_output_stability(self):
         detector = RingDetector()
