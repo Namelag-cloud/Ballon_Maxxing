@@ -209,7 +209,11 @@ class BehavioralModel:
             intended_ticks += self._rng.uniform(12.0, 48.0)
         intended_ticks *= (1.0 + modifier)
         self._last_reaction_ticks = intended_ticks
-        reaction_s = intended_ticks * ENGINE_TICK_MS / 1000.0
+        # The target was already observed before plan_action(). Only the
+        # post-acquisition reaction portion is scheduled; the perception
+        # component remains part of the measured acquisition-to-click interval.
+        scheduled_reaction_ticks = max(0.0, intended_ticks - self._profile.perception_ticks)
+        reaction_s = scheduled_reaction_ticks * ENGINE_TICK_MS / 1000.0
 
         raw_movement = sample_fitts_mt(
             self._rng, distance, max(1.0, target_width),
