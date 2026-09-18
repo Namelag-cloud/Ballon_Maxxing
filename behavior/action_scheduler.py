@@ -27,6 +27,8 @@ class ActionTimestamps:
     click_down: float = 0.0
     click_up: float = 0.0
     action_complete: float = 0.0
+    interrupted: bool = False
+    cancel_reason: str | None = None
 
 
 @dataclass
@@ -172,17 +174,35 @@ class ActionScheduler:
             action.timestamps.movement_end = now
             action.phase = ActionPhase.CLICK_DOWN
 
-    def cancel(self) -> Optional[ActionTimestamps]:
+    def cancel(self, input_backend: InputBackend | None = None, reason: str = "cancelled") -> Optional[ActionTimestamps]:
         if self._active is None:
             return None
         action = self._active
+        action.timestamps.interrupted = True
+        action.timestamps.cancel_reason = reason
+        if action.phase == ActionPhase.CLICK_HOLD and input_backend is not None:
+            try:
+                action.timestamps.click_up = input_backend.left_up()
+            except Exception as exc:
+                if self._diagnostic:
+                    self._diagnostic.log(
+                        "sendinput_dispatch_error",
+                        kind="shutdown_mouse_up",
+                        error=str(exc),
+                    )
         action.timestamps.action_complete = self._clock()
         action.phase = ActionPhase.COMPLETE
         self._completed_history.append(action.timestamps)
         timestamps = action.timestamps
         self._active = None
         if self._diagnostic:
-            self._diagnostic.log("scheduler_cancel", scheduler="primary")
+            self._diagnostic.log(
+                "scheduler_cancel",
+                scheduler="primary",
+                reason=reason,
+                phase=action.phase.name,
+                interrupted=True,
+            )
         return timestamps
 
     def force_complete(self) -> Optional[ActionTimestamps]:
