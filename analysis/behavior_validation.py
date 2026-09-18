@@ -41,11 +41,14 @@ def load_rows(paths):
         if path.suffix.lower() == ".json":
             data = json.loads(path.read_text())
             duration = data.get("session", {}).get("duration_s")
-            for index, outcome in enumerate(data.get("outcomes", [])):
+            outcomes = data.get("outcomes", [])
+            for index, outcome in enumerate(outcomes):
                 row = dict(outcome)
                 if duration is not None and index == 0:
                     row["_session_duration_s"] = duration
                 rows.append(row)
+            if duration is not None and not outcomes:
+                rows.append({"_session_duration_s": duration})
         else:
             with open(path, newline="") as f:
                 rows.extend(csv.DictReader(f))
@@ -166,7 +169,7 @@ def ks_distance(a, b):
 
 def compare(bot_rows, reference_rows):
     keys = {
-        "reaction_interval_ticks": "estimated_reaction_ticks",
+        "reaction_interval_ticks": "estimated_acquisition_click_ticks",
         "spatial_error_radius": "endpoint_error_px",
         "duo_delta_ms": "duo_delta_ms",
     }
