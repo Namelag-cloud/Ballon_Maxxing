@@ -292,6 +292,17 @@ class BalloonExecutor:
             g_ts = self._fast_click(input_backend, g_screen)
             clicks += 1
             input_timestamp = g_ts.click_up
+            outcomes.append(
+                self._make_outcome(
+                    g_behavior,
+                    g_ts,
+                    g_screen[0],
+                    g_screen[1],
+                    "g_symbol",
+                    target_id=g_action.target_id,
+                    execution_status="fast",
+                )
+            )
             if self._diagnostic:
                 self._diagnostic.log(
                     "fast_click",
