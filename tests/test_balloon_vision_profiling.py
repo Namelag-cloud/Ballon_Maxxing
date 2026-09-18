@@ -72,6 +72,40 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             self.assertIsInstance(first_profile["candidate_counts"][color], int)
             self.assertGreaterEqual(first_profile["candidate_counts"][color], 0)
 
+    def test_hollow_colored_ui_ring_is_not_a_balloon(self):
+        profile = BalloonGameProfile()
+        frame = np.zeros((180, 240, 3), dtype=np.uint8)
+
+        # A zero-like hollow UI glyph: saturated colored edge around an
+        # enclosed background hole. It deliberately satisfies the size/shape
+        # regime of the prior false-positive path.
+        cv2 = __import__("cv2")
+        cv2.circle(frame, (120, 140), 31, (0, 0, 255), thickness=12)
+
+        detections = profile.detect(frame)
+
+        balloon_types = {"normal_balloon", "special_sequence_balloon", "twin_balloon"}
+        self.assertFalse(
+            any(d.get("target_type") in balloon_types for d in detections)
+        )
+
+    def test_filled_colored_balloon_remains_detectable(self):
+        profile = BalloonGameProfile()
+        frame = np.zeros((180, 240, 3), dtype=np.uint8)
+
+        cv2 = __import__("cv2")
+        cv2.circle(frame, (120, 80), 25, (0, 0, 255), thickness=-1)
+
+        detections = profile.detect(frame)
+
+        self.assertTrue(
+            any(
+                d.get("target_type") == "normal_balloon"
+                and d.get("color_name") == "red"
+                for d in detections
+            )
+        )
+
     def test_ring_profile_fields_and_output_stability(self):
         detector = RingDetector()
         frame = np.zeros((160, 200, 3), dtype=np.uint8)
