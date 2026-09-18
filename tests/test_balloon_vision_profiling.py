@@ -103,6 +103,33 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             any(d.get("target_type") in balloon_types for d in detections)
         )
 
+    def test_non_balloon_aspect_ratios_are_rejected(self):
+        profile = BalloonGameProfile()
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+        # Empirical false-positive shape: ~59x101 (aspect ~0.58).
+        cv2.ellipse(frame, (80, 120), (29, 50), 0, 0, 360, (0, 0, 255), thickness=-1)
+        # Another observed UI candidate was much wider than a balloon (~316x147).
+        cv2.ellipse(frame, (240, 120), (100, 46), 0, 0, 360, (255, 0, 0), thickness=-1)
+
+        detections = profile.detect(frame)
+
+        balloon_types = {
+            "normal_balloon",
+            "special_sequence_balloon",
+            "twin_balloon",
+        }
+        self.assertFalse(
+            any(d.get("target_type") in balloon_types for d in detections)
+        )
+        self.assertFalse(
+            any(
+                candidate["aspect_ratio"] < profile._CORE_MIN_ASPECT_RATIO
+                or candidate["aspect_ratio"] > profile._CORE_MAX_ASPECT_RATIO
+                for candidate in profile.last_profile["candidate_geometry"]
+            )
+        )
+
     def test_filled_colored_balloon_remains_detectable(self):
         profile = BalloonGameProfile()
         frame = np.zeros((180, 240, 3), dtype=np.uint8)
