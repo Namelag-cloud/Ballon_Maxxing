@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 import cv2
 import numpy as np
@@ -32,18 +33,46 @@ class RingDetector:
         self._min_ratio = min_ratio
         self._max_ratio = max_ratio
         self._min_confidence = min_confidence
+        self._last_profile = self._empty_profile()
+
+    @staticmethod
+    def _empty_profile() -> dict[str, float | int | list[int]]:
+        return {
+            "total_ms": 0.0,
+            "crop_ms": 0.0,
+            "grayscale_ms": 0.0,
+            "blur_ms": 0.0,
+            "hough_ms": 0.0,
+            "canny_ms": 0.0,
+            "scoring_ms": 0.0,
+            "hough_called": 0,
+            "circles_returned": 0,
+            "crop_shape": [0, 0],
+        }
+
+    @property
+    def last_profile(self) -> dict[str, float | int | list[int]]:
+        return dict(self._last_profile)
 
     def detect(
         self,
         bgr_frame: np.ndarray,
         bbox: tuple[int, int, int, int],
     ) -> RingResult:
+        total_t0 = time.perf_counter()
+        profile = self._empty_profile()
+        self._last_profile = profile
+
         x, y, w, h = bbox
         if w <= 0 or h <= 0:
+            profile["total_ms"] = (time.perf_counter() - total_t0) * 1000.0
+            self._last_profile = profile
             return RingResult(False)
 
         radius = max(w, h) / 2.0
         if radius < 10.0:
+            profile["total_ms"] = (time.perf_counter() - total_t0) * 1000.0
+            self._last_profile = profile
             return RingResult(False)
 
         frame_h, frame_w = bgr_frame.shape[:2]
@@ -52,17 +81,28 @@ class RingDetector:
         y0 = max(0, int(y + h / 2 - pad))
         x1 = min(frame_w, int(x + w / 2 + pad))
         y1 = min(frame_h, int(y + h / 2 + pad))
+        crop_t0 = time.perf_counter()
         crop = bgr_frame[y0:y1, x0:x1]
+        profile["crop_ms"] = (time.perf_counter() - crop_t0) * 1000.0
+        profile["crop_shape"] = [int(crop.shape[1]), int(crop.shape[0])] if crop.size else [0, 0]
         if crop.size == 0:
+            profile["total_ms"] = (time.perf_counter() - total_t0) * 1000.0
+            self._last_profile = profile
             return RingResult(False)
 
+        grayscale_t0 = time.perf_counter()
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        profile["grayscale_ms"] = (time.perf_counter() - grayscale_t0) * 1000.0
+
+        blur_t0 = time.perf_counter()
         gray = cv2.GaussianBlur(gray, (7, 7), 1.5)
+        profile["blur_ms"] = (time.perf_counter() - blur_t0) * 1000.0
 
         min_radius = max(8, int(radius * self._min_ratio))
         max_radius = max(min_radius + 2, int(radius * self._max_ratio))
         min_dist = max(12, int(radius * 0.65))
 
+        hough_t0 = time.perf_counter()
         circles = cv2.HoughCircles(
             gray,
             cv2.HOUGH_GRADIENT,
@@ -73,13 +113,21 @@ class RingDetector:
             minRadius=min_radius,
             maxRadius=max_radius,
         )
+        profile["hough_ms"] = (time.perf_counter() - hough_t0) * 1000.0
+        profile["hough_called"] = 1
+        profile["circles_returned"] = int(len(circles[0])) if circles is not None else 0
         if circles is None:
+            profile["total_ms"] = (time.perf_counter() - total_t0) * 1000.0
+            self._last_profile = profile
             return RingResult(False)
 
         expected_cx = x + w / 2.0
         expected_cy = y + h / 2.0
+        canny_t0 = time.perf_counter()
         edges = cv2.Canny(gray, 50, 120)
+        profile["canny_ms"] = (time.perf_counter() - canny_t0) * 1000.0
 
+        scoring_t0 = time.perf_counter()
         best: tuple[float, float, float] | None = None
         for cx, cy, ring_radius in np.round(circles[0]).astype(int):
             abs_cx = x0 + cx
@@ -106,16 +154,22 @@ class RingDetector:
             candidate = (confidence, float(ring_radius), ratio)
             if best is None or candidate[0] > best[0]:
                 best = candidate
+        profile["scoring_ms"] = (time.perf_counter() - scoring_t0) * 1000.0
 
         if best is None or best[0] < self._min_confidence:
+            profile["total_ms"] = (time.perf_counter() - total_t0) * 1000.0
+            self._last_profile = profile
             return RingResult(False)
 
-        return RingResult(
+        result = RingResult(
             detected=True,
             radius_px=best[1],
             radius_ratio=best[2],
             confidence=best[0],
         )
+        profile["total_ms"] = (time.perf_counter() - total_t0) * 1000.0
+        self._last_profile = profile
+        return result
 
     @staticmethod
     def _circle_edge_support(
