@@ -15,17 +15,29 @@ class DownstreamDiagnostic:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._stream = self.path.open("w", encoding="utf-8")
         self._seq = 0
+        self._frame_log_duration_ms = 0.0
+
+    @property
+    def frame_log_duration_ms(self) -> float:
+        return self._frame_log_duration_ms
+
+    def begin_frame(self) -> None:
+        self._frame_log_duration_ms = 0.0
 
     def log(self, event: str, **data: Any) -> None:
-        self._seq += 1
-        record = {
-            "seq": self._seq,
-            "t_mono": time.perf_counter(),
-            "event": event,
-            **self._jsonable(data),
-        }
-        self._stream.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
-        self._stream.flush()
+        t0 = time.perf_counter()
+        try:
+            self._seq += 1
+            record = {
+                "seq": self._seq,
+                "t_mono": time.perf_counter(),
+                "event": event,
+                **self._jsonable(data),
+            }
+            self._stream.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+            self._stream.flush()
+        finally:
+            self._frame_log_duration_ms += (time.perf_counter() - t0) * 1000.0
 
     def close(self) -> None:
         if not self._stream.closed:
