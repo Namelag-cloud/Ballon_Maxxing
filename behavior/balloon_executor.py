@@ -37,10 +37,11 @@ class BalloonExecutionResult:
 class BalloonExecutor:
     """Execute visible decisions through the stochastic behavioral model."""
 
-    def __init__(self, behavior: BehavioralModel, clock=None, initial_mouse_position=(0, 0), diagnostic: DownstreamDiagnostic | None = None) -> None:
+    def __init__(self, behavior: BehavioralModel, clock=None, initial_mouse_position=(0, 0), diagnostic: DownstreamDiagnostic | None = None, fast_execution: bool = False) -> None:
         self._clock = clock or now_monotonic
         self._behavior = behavior
         self._diagnostic = diagnostic
+        self._fast_execution = fast_execution
         self._primary_scheduler = ActionScheduler(clock=clock, diagnostic=diagnostic)
         self._twin_scheduler = TwinActionScheduler(clock=clock, diagnostic=diagnostic)
         self._g_scheduler = ActionScheduler(clock=clock, diagnostic=diagnostic)
@@ -92,6 +93,16 @@ class BalloonExecutor:
             self._g_should_execute = not getattr(self._behavior, "should_abandon_balloon_g", lambda: False)()
         actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
         self._latest_g = g_action
+
+        if self._fast_execution:
+            return self._tick_fast(
+                actions,
+                g_action,
+                input_backend,
+                region_left,
+                region_top,
+                input_enabled,
+            )
 
         # A primary plan is created from a prior visual observation. Before the
         # scheduler reaches mouse-down, require that its target is still present
@@ -248,6 +259,202 @@ class BalloonExecutor:
             g_click_completed=g_completed,
             completed_primary_action=completed_primary_action,
             outcomes=tuple(outcomes),
+        )
+
+    def _tick_fast(
+        self,
+        actions,
+        g_action,
+        input_backend,
+        region_left: int,
+        region_top: int,
+        input_enabled: bool,
+    ) -> BalloonExecutionResult:
+        """Dispatch visible balloon decisions immediately through the input backend.
+
+        This explicit fast path bypasses behavioral reaction, movement, click-hold,
+        and idle-gap scheduling. The normal stochastic scheduler remains untouched
+        and is used whenever fast_execution is False.
+        """
+        if not input_enabled:
+            return BalloonExecutionResult()
+
+        clicks = 0
+        input_timestamp = None
+        action_timestamps = None
+        twin_completion = None
+        completed_primary_action = None
+        outcomes: list[SessionOutcome] = []
+
+        if g_action is not None:
+            g_screen = self._to_screen(g_action.position, region_left, region_top)
+            g_behavior = self._fast_behavioral_action(g_screen, g_action.target_width)
+            g_ts = self._fast_click(input_backend, g_screen)
+            clicks += 1
+            input_timestamp = g_ts.click_up
+            if self._diagnostic:
+                self._diagnostic.log(
+                    "fast_click",
+                    lane="g",
+                    target=self._action_info(g_action),
+                    click_down_ts=g_ts.click_down,
+                    click_up_ts=g_ts.click_up,
+                )
+
+        if not actions:
+            return BalloonExecutionResult(
+                clicks_sent=clicks,
+                input_timestamp=input_timestamp,
+            )
+
+        action = actions[0]
+        if isinstance(action, TwinAction):
+            first, second = action.targets
+            first_xy = self._to_screen(first.position, region_left, region_top)
+            second_xy = self._to_screen(second.position, region_left, region_top)
+            first_behavior = self._fast_behavioral_action(first_xy, first.target_width)
+            second_behavior = self._fast_behavioral_action(second_xy, second.target_width)
+            first_down, first_up, second_down, second_up = input_backend.click_pair(
+                first_xy,
+                second_xy,
+                0.0,
+            )
+            first_ts = ActionTimestamps(
+                action_planned=first_down,
+                reaction_start=first_down,
+                reaction_end=first_down,
+                movement_start=first_down,
+                movement_end=first_down,
+                click_down=first_down,
+                click_up=first_up,
+                action_complete=first_up,
+            )
+            second_ts = ActionTimestamps(
+                action_planned=second_down,
+                reaction_start=second_down,
+                reaction_end=second_down,
+                movement_start=second_down,
+                movement_end=second_down,
+                click_down=second_down,
+                click_up=second_up,
+                action_complete=second_up,
+            )
+            twin_completion = TwinActionCompletion(
+                first_ts,
+                second_ts,
+                abs(first_down - second_down) * 1000.0,
+                0.0,
+            )
+            clicks += 2
+            input_timestamp = max(first_up, second_up)
+            action_timestamps = first_ts
+            outcomes.extend(
+                (
+                    self._make_outcome(
+                        first_behavior,
+                        first_ts,
+                        first_xy[0],
+                        first_xy[1],
+                        first.target_type.value,
+                        target_id=first.target_id,
+                        execution_status="fast",
+                    ),
+                    self._make_outcome(
+                        second_behavior,
+                        second_ts,
+                        second_xy[0],
+                        second_xy[1],
+                        second.target_type.value,
+                        target_id=second.target_id,
+                        execution_status="fast",
+                    ),
+                )
+            )
+            completed_primary_action = action
+        else:
+            screen_xy = self._to_screen(action.position, region_left, region_top)
+            behavioral_action = self._fast_behavioral_action(
+                screen_xy,
+                action.target_width,
+            )
+            action_timestamps = self._fast_click(input_backend, screen_xy)
+            clicks += 1
+            input_timestamp = action_timestamps.click_up
+            completed_primary_action = action
+            outcomes.append(
+                self._make_outcome(
+                    behavioral_action,
+                    action_timestamps,
+                    screen_xy[0],
+                    screen_xy[1],
+                    action.target_type.value,
+                    target_id=action.target_id,
+                    execution_status="fast",
+                )
+            )
+            if self._diagnostic:
+                self._diagnostic.log(
+                    "fast_click",
+                    lane="primary",
+                    target=self._action_info(action),
+                    click_down_ts=action_timestamps.click_down,
+                    click_up_ts=action_timestamps.click_up,
+                )
+
+        return BalloonExecutionResult(
+            clicks_sent=clicks,
+            input_timestamp=input_timestamp,
+            action_timestamps=action_timestamps,
+            twin_completion=twin_completion,
+            completed_primary_action=completed_primary_action,
+            outcomes=tuple(outcomes),
+        )
+
+    def _fast_click(self, input_backend, screen_xy: tuple[int, int]) -> ActionTimestamps:
+        action_planned = self._clock()
+        input_backend.move_to(*screen_xy)
+        movement_end = self._clock()
+        click_down = input_backend.left_down()
+        click_up = input_backend.left_up()
+        return ActionTimestamps(
+            action_planned=action_planned,
+            reaction_start=action_planned,
+            reaction_end=movement_end,
+            movement_start=action_planned,
+            movement_end=movement_end,
+            click_down=click_down,
+            click_up=click_up,
+            action_complete=click_up,
+        )
+
+    @staticmethod
+    def _fast_behavioral_action(
+        screen_xy: tuple[int, int],
+        target_width: float,
+    ) -> BehavioralAction:
+        now = time.perf_counter()
+        return BehavioralAction(
+            reaction_time_s=0.0,
+            movement_time_s=0.0,
+            click_duration_s=0.0,
+            trajectory=[],
+            total_time_s=0.0,
+            start_position=(float(screen_xy[0]), float(screen_xy[1])),
+            target_position=(float(screen_xy[0]), float(screen_xy[1])),
+            click_position=(float(screen_xy[0]), float(screen_xy[1])),
+            distance=0.0,
+            target_width=max(1.0, float(target_width)),
+            fitts_id=0.0,
+            endpoint_error_px=0.0,
+            pause_duration_s=0.0,
+            is_miss=False,
+            is_delayed=False,
+            session_modifier=0.0,
+            warmup_factor=0.0,
+            fatigue_factor=0.0,
+            planned_at=now,
+            acquisition_timestamp=None,
+            scheduler_delay_s=0.0,
         )
 
     def _cancel_stale_primary(self, actions, notifications, multicolor_specials) -> None:
