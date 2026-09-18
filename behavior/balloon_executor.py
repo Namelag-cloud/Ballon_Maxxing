@@ -7,6 +7,7 @@ from behavior.action_scheduler import ActionScheduler, ActionTimestamps, TwinAct
 from behavior.model import BehavioralAction, BehavioralModel
 from game_profiles.balloon_types import BalloonAction, TwinAction
 from input.coordinates import frame_to_screen
+from telemetry.outcome import SessionOutcome
 
 
 class PairInputBackend(Protocol):
@@ -27,6 +28,7 @@ class BalloonExecutionResult:
     twin_completion: Optional[TwinActionCompletion] = None
     g_click_completed: bool = False
     completed_primary_action: BalloonAction | None = None
+    outcomes: tuple[SessionOutcome, ...] = ()
 
 
 class BalloonExecutor:
@@ -73,6 +75,7 @@ class BalloonExecutor:
         twin_completion = None
         g_completed = False
         completed_primary_action = None
+        outcomes: list[SessionOutcome] = []
 
         # G is independently observable. If it disappears before dispatch,
         # cancel only the pending plan; an already-dispatched click may finish.
@@ -94,6 +97,9 @@ class BalloonExecutor:
             clicks += 1
             g_completed = True
             input_timestamp = g_completion.click_up
+            g_active = self._g_scheduler.active_action
+            if g_active is not None:
+                outcomes.append(self._make_outcome(g_active.behavioral_action, g_completion, g_active.target_x, g_active.target_y, "g_symbol"))
 
         if g_completion is not None and self._g_visible and input_enabled:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
@@ -116,6 +122,12 @@ class BalloonExecutor:
                 round(self._behavioral_endpoint(self._twin_scheduler.active_actions[1].behavioral_action)[0]),
                 round(self._behavioral_endpoint(self._twin_scheduler.active_actions[1].behavioral_action)[1]),
             ) if self._twin_scheduler.active_actions else self._current_mouse
+            if isinstance(self._active_primary, TwinAction):
+                first_b, second_b = self._active_primary.targets
+                if self._twin_scheduler.active_actions is not None:
+                    first_a, second_a = self._twin_scheduler.active_actions
+                    outcomes.append(self._make_outcome(first_a.behavioral_action, twin_completion.first, first_a.target_x, first_a.target_y, first_b.target_type.value, twin_completion.click_down_delta_ms))
+                    outcomes.append(self._make_outcome(second_a.behavioral_action, twin_completion.second, second_a.target_x, second_a.target_y, second_b.target_type.value, twin_completion.click_down_delta_ms))
             self._active_primary = None
             self._idle_until = self._clock() + self._behavior.sample_idle_gap_s()
 
@@ -126,6 +138,9 @@ class BalloonExecutor:
             input_timestamp = primary_completion.click_up
             if isinstance(self._active_primary, BalloonAction):
                 completed_primary_action = self._active_primary
+                active = self._primary_scheduler.active_action
+                if active is not None:
+                    outcomes.append(self._make_outcome(active.behavioral_action, primary_completion, active.target_x, active.target_y, completed_primary_action.target_type.value))
             self._active_primary = None
             self._primary_scheduler.clear()
             self._idle_until = self._clock() + self._behavior.sample_idle_gap_s()
@@ -137,6 +152,7 @@ class BalloonExecutor:
             twin_completion=twin_completion,
             g_click_completed=g_completed,
             completed_primary_action=completed_primary_action,
+            outcomes=tuple(outcomes),
         )
 
     def _start_single(self, scheduler, action: BalloonAction | None, region_left: int, region_top: int) -> None:
@@ -172,6 +188,37 @@ class BalloonExecutor:
     @staticmethod
     def _behavioral_endpoint(action: BehavioralAction) -> tuple[float, float]:
         return action.click_position
+
+    @staticmethod
+    def _make_outcome(
+        behavioral_action: BehavioralAction,
+        timestamps: ActionTimestamps,
+        screen_x: int,
+        screen_y: int,
+        target_type: str,
+        duo_delta_ms: float | None = None,
+    ) -> SessionOutcome:
+        observed_reaction = None
+        if behavioral_action.acquisition_timestamp is not None and timestamps.click_down:
+            observed_reaction = max(
+                0.0,
+                (timestamps.click_down - behavioral_action.acquisition_timestamp) / (1000.0 / 60.0),
+            )
+        return SessionOutcome(
+            target_type=target_type,
+            target_first_seen_ts=behavioral_action.acquisition_timestamp,
+            acquisition_ts=behavioral_action.acquisition_timestamp,
+            planned_dispatch_ts=behavioral_action.planned_at,
+            dispatch_ts=timestamps.click_down or timestamps.click_up,
+            estimated_reaction_ticks=observed_reaction,
+            screen_click_x=int(screen_x),
+            screen_click_y=int(screen_y),
+            endpoint_error_px=behavioral_action.endpoint_error_px,
+            intended_reaction_ticks=behavioral_action.intended_reaction_ticks,
+            intended_reaction_s=behavioral_action.reaction_time_s,
+            duo_delta_ms=duo_delta_ms,
+            observation_notes=["UNOBSERVABLE THROUGH CURRENT INTERFACE: authoritative spawnTick/popTick/hit state"],
+        )
 
     @staticmethod
     def _to_screen(position, region_left, region_top):
