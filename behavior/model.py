@@ -234,6 +234,16 @@ class BehavioralModel:
             endpoint_multiplier = self._profile.fat_finger_multiplier if fat_finger else 1.0
             dx = self._rng.normal(0.0, sigma * endpoint_multiplier)
             dy = self._rng.normal(0.0, sigma_y * endpoint_multiplier)
+            max_endpoint_error = min(
+                float(self._config.endpoint_error.max_px),
+                max(1.0, target_width / 2.0)
+                * float(self._config.endpoint_error.max_radius_fraction),
+            )
+            error_distance = math.hypot(dx, dy)
+            if max_endpoint_error > 0 and error_distance > max_endpoint_error:
+                scale = max_endpoint_error / error_distance
+                dx *= scale
+                dy *= scale
             actual_target_x = target_x + dx
             actual_target_y = target_y + dy
 
