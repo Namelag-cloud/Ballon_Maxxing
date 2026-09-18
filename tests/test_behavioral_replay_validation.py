@@ -1,4 +1,3 @@
-from telemetry.outcome import TimingCalibration
 from __future__ import annotations
 
 import time
@@ -10,6 +9,7 @@ from behavior.model import BehavioralAction, BehavioralModel
 from decision.mechanics import BalloonDecisionEngine
 from game_profiles.balloon_types import TargetType
 from vision.feedback import FeedbackReader
+from telemetry.outcome import TimingCalibration
 from config.settings import Settings
 
 
