@@ -85,6 +85,14 @@ class BalloonExecutor:
             self._g_should_execute = not getattr(self._behavior, "should_abandon_balloon_g", lambda: False)()
         actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
         self._latest_g = g_action
+
+        # A primary plan is created from a prior visual observation. Before the
+        # scheduler reaches mouse-down, require that its target is still present
+        # in the latest decision candidates. This is deliberately limited to
+        # pre-dispatch phases; once mouse-down has occurred the click is already
+        # in flight and is not cancelled from later visual changes.
+        self._cancel_stale_primary(actions, notifications, multicolor_specials)
+
         if self._diagnostic:
             self._diagnostic.log("behavior_gate", gate="new_action", allowed=actions_allowed, **self._behavior_gate_state(duration_s))
 
@@ -234,6 +242,60 @@ class BalloonExecutor:
             completed_primary_action=completed_primary_action,
             outcomes=tuple(outcomes),
         )
+
+    def _cancel_stale_primary(self, actions, notifications, multicolor_specials) -> None:
+        if self._primary_scheduler.is_idle and self._twin_scheduler.is_idle:
+            return
+
+        active = self._primary_scheduler.active_action
+        if active is not None and active.phase.name in {"WAITING_REACTION", "MOVING", "CLICK_DOWN"}:
+            target_id = self._active_primary.target_id if isinstance(self._active_primary, BalloonAction) else None
+            if target_id is not None and not self._target_id_observed(
+                target_id, actions, notifications, multicolor_specials
+            ):
+                self._primary_scheduler.cancel()
+                if self._diagnostic:
+                    self._diagnostic.log(
+                        "stale_action_cancel",
+                        lane="primary",
+                        target_id=target_id,
+                        phase=active.phase.name,
+                        reason="target_absent_from_latest_decision_observation",
+                    )
+
+        active_twin = self._twin_scheduler.active_actions
+        if active_twin is not None and not self._twin_scheduler.is_idle:
+            target_ids = {
+                target.target_id
+                for target in self._active_primary.targets
+            } if isinstance(self._active_primary, TwinAction) else set()
+            if target_ids and not target_ids.issubset(
+                self._observed_target_ids(actions, notifications, multicolor_specials)
+            ):
+                self._twin_scheduler.clear()
+                if self._diagnostic:
+                    self._diagnostic.log(
+                        "stale_action_cancel",
+                        lane="twin",
+                        target_ids=sorted(target_ids),
+                        reason="target_absent_from_latest_decision_observation",
+                    )
+
+    @classmethod
+    def _observed_target_ids(cls, actions, notifications, multicolor_specials) -> set[int]:
+        ids: set[int] = set()
+        for candidate in tuple(actions) + tuple(notifications) + tuple(multicolor_specials):
+            if isinstance(candidate, TwinAction):
+                for target in candidate.targets:
+                    if target.target_id is not None:
+                        ids.add(target.target_id)
+            elif candidate.target_id is not None:
+                ids.add(candidate.target_id)
+        return ids
+
+    @classmethod
+    def _target_id_observed(cls, target_id, actions, notifications, multicolor_specials) -> bool:
+        return target_id in cls._observed_target_ids(actions, notifications, multicolor_specials)
 
     def _start_single(self, scheduler, action: BalloonAction | None, region_left: int, region_top: int) -> None:
         if action is None:
