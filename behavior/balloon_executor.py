@@ -117,10 +117,10 @@ class BalloonExecutor:
             if g_active is not None:
                 outcomes.append(self._make_outcome(g_active.behavioral_action, g_completion, g_active.target_x, g_active.target_y, "g_symbol", target_id=self._latest_g.target_id if self._latest_g else None))
 
-        if g_completion is not None and self._g_visible and input_enabled:
+        if g_completion is not None and self._g_visible and input_enabled and actions_allowed:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
-        actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)() and getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
+        actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
         if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed:
             if input_enabled:
                 action = None
