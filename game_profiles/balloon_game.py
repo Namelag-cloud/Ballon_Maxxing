@@ -39,6 +39,7 @@ class BalloonGameProfile(GameProfile):
     # coordinates, while remaining tolerant of balloons clipped by a frame edge.
     _CORE_FILL_MAX = 0.90
     _CORE_MIN_CIRCULARITY = 0.45
+    _MAX_ENCLOSED_HOLE_RATIO = 0.20
     _WHITE_CORE_RATIO = 0.50
     _WHITE_MIN_DIAMETER_RATIO = 0.05
     _TWIN_WHITE_BORDER_RATIO = 0.10
@@ -346,10 +347,10 @@ class BalloonGameProfile(GameProfile):
             if w <= 0 or h <= 0:
                 continue
 
-            component_mask = np.zeros(mask.shape, dtype=np.uint8)
-            component_mask[labels == label] = 255
-            contour_list, _ = cv2.findContours(
-                component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            component_mask = np.zeros((h, w), dtype=np.uint8)
+            component_mask[labels[y:y + h, x:x + w] == label] = 255
+            contour_list, hierarchy = cv2.findContours(
+                component_mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
             )
             if not contour_list:
                 continue
@@ -363,6 +364,19 @@ class BalloonGameProfile(GameProfile):
             )
             hull_area = cv2.contourArea(cv2.convexHull(contour))
             solidity = contour_area / hull_area if hull_area > 0 else 0.0
+
+            enclosed_hole_area = 0.0
+            if hierarchy is not None:
+                for contour_index, contour_info in enumerate(hierarchy[0]):
+                    if contour_info[3] == contour_list.index(
+                        max(contour_list, key=cv2.contourArea)
+                    ):
+                        continue
+                    if contour_info[3] >= 0:
+                        enclosed_hole_area += cv2.contourArea(contour_list[contour_index])
+            hole_ratio = enclosed_hole_area / float(w * h) if w * h else 0.0
+            if hole_ratio > self._MAX_ENCLOSED_HOLE_RATIO:
+                continue
 
             white_core_ratio = self._white_core_ratio(hsv, (x, y, w, h))
             diameter_ratio = max(w, h) / frame_height if frame_height else 0.0
