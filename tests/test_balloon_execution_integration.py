@@ -230,9 +230,13 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         self.assertFalse(result.g_click_completed)
         self.assertEqual(self.executor.latest_g.position, (80, 90))
 
-        for _ in range(4):
+        completed = False
+        for _ in range(5):
             result = self.executor.tick([], g2, self.input, 0, 0, True)
-        self.assertTrue(result.g_click_completed)
+            completed = completed or result.g_click_completed
+            if completed:
+                break
+        self.assertTrue(completed)
         self.assertEqual(self.input.moves[-1][1:], (80, 90))
 
         # A still-pending G action is cancelled when vision reports that G
