@@ -45,6 +45,12 @@
     "enabled": true,
     "click_delay_ms": 0
   },
+  "feedback": {
+    "combo_roi": null,
+    "score_roi": null,
+    "pop_roi": null,
+    "change_threshold": 0.08
+  },
   "debug": {
     "show_detections": true,
     "show_bounding_boxes": true,
