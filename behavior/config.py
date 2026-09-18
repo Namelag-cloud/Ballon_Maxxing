@@ -89,6 +89,7 @@ class EndpointErrorConfig:
     enabled: bool = True
     scale_px: float = 5.0
     max_px: float = 12.0
+    max_radius_fraction: float = 0.50
     spatial_sigma_pct: float = 0.16
 
 
