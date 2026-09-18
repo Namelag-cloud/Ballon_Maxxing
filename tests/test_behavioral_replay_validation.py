@@ -87,7 +87,9 @@ class TestBehavioralReplayValidation(unittest.TestCase):
             "target_type": TargetType.MULTICOLOR_SPECIAL.value, "color_name": "blue",
             "center": (100, 100), "width": 40, "bbox": (80, 80, 40, 40), "confidence": 1.0,
         }
-        self.assertEqual(engine.decide([gemini]).multicolor_specials, ())
+        no_notification = engine.decide([gemini])
+        self.assertEqual(len(no_notification.multicolor_specials), 1)
+        self.assertEqual(no_notification.actions, ())
         notification = {
             "target_type": TargetType.NOTIFICATION.value, "color_name": "red",
             "center": (200, 200), "width": 30, "bbox": (185, 185, 30, 30), "confidence": 1.0,
