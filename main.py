@@ -136,7 +136,12 @@ class Application:
         self._selector = TargetSelector(settings)
         self._input_backend = SendInputBackend() if settings.input.enabled else None
         self._telemetry = TelemetryLogger()
-        self._feedback_reader = FeedbackReader()
+        self._feedback_reader = FeedbackReader(
+            combo_roi=settings.feedback.combo_roi,
+            score_roi=settings.feedback.score_roi,
+            pop_roi=settings.feedback.pop_roi,
+            change_threshold=settings.feedback.change_threshold,
+        )
         self._last_feedback = None
         self._visualizer = DebugVisualizer(settings)
 
