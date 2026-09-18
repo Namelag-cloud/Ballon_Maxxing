@@ -132,6 +132,9 @@ class BehavioralModel:
             return False
         return self._rng.random() < self._profile.early_exit_prob / 60.0
 
+    def should_click_notification(self) -> bool:
+        return self._rng.random() < self._profile.notif_hit_rate
+
     def sample_idle_gap_s(self) -> float:
         if self._profile.idle_lambda <= 0:
             return 0.0
