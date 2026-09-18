@@ -68,13 +68,14 @@ class FakeBehavior:
 
     def __init__(self) -> None:
         self.plans = 0
+        self.click_duration_s = 0.0
 
     def plan_action(self, **_kwargs) -> BehavioralAction:
         self.plans += 1
         return BehavioralAction(
             reaction_time_s=0.0,
             movement_time_s=0.0,
-            click_duration_s=0.0,
+            click_duration_s=self.click_duration_s,
             trajectory=[],
             total_time_s=0.0,
             start_position=(0.0, 0.0),
@@ -262,6 +263,23 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         self.assertFalse(result.completed_primary_action)
         self.assertTrue(self.executor.primary_scheduler.is_idle)
         self.assertEqual(self.input.downs, [])
+
+    def test_shutdown_releases_held_button_and_marks_action_interrupted(self):
+        self.behavior.click_duration_s = 1.0
+        action = self.engine.decide([
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.RED, (100, 100), 32)
+        ]).actions
+
+        self.executor.tick(action, None, self.input, 0, 0, True)
+        self.assertEqual(self.input.downs, [0.0])
+        self.assertEqual(self.input.ups, [])
+
+        outcomes = self.executor.shutdown(self.input)
+
+        self.assertEqual(self.input.ups, [0.0])
+        self.assertTrue(self.executor.primary_scheduler.is_idle)
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].execution_status, "interrupted")
 
     def test_tracker_preserves_game_metadata_without_interpreting_it(self):
         tracker = Tracker(self.settings)
