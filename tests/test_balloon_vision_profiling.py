@@ -1,5 +1,6 @@
 import unittest
 
+import cv2
 import numpy as np
 
 from game_profiles.balloon_game import BalloonGameProfile
@@ -91,7 +92,6 @@ class BalloonVisionProfilingTests(unittest.TestCase):
         # A zero-like hollow UI glyph: saturated colored edge around an
         # enclosed background hole. It deliberately satisfies the size/shape
         # regime of the prior false-positive path.
-        cv2 = __import__("cv2")
         cv2.circle(frame, (120, 140), 31, (0, 0, 255), thickness=12)
 
         detections = profile.detect(frame)
