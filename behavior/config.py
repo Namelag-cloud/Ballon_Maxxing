@@ -132,7 +132,6 @@ class HumanProfileConfig:
     perception_min_ticks: float = 2.0
     perception_max_ticks: float = 5.0
     duo_delta_sigma: float = 0.4
-    fat_finger_sigma_pct: float = 0.025
 
 
 @dataclass
