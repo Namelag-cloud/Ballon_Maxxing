@@ -79,7 +79,7 @@ class BalloonExecutor:
         elif g_action.target_id != self._g_decision_target_id:
             self._g_decision_target_id = g_action.target_id
             self._g_should_execute = not getattr(self._behavior, "should_abandon_balloon_g", lambda: False)()
-        actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)()
+        actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
         self._latest_g = g_action
 
         clicks = 0
