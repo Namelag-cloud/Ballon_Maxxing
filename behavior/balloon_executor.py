@@ -46,6 +46,10 @@ class BalloonExecutor:
         self._latest_g: BalloonAction | None = None
         self._g_visible = False
         self._idle_until = 0.0
+        self._g_decision_target_id = None
+        self._g_should_execute = True
+        self._special_fail_target_id = None
+        self._special_should_execute = True
 
     @property
     def primary_scheduler(self) -> ActionScheduler:
@@ -69,6 +73,12 @@ class BalloonExecutor:
     def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=(), multicolor_specials=()) -> BalloonExecutionResult:
         now = self._clock()
         self._g_visible = g_action is not None
+        if g_action is None:
+            self._g_decision_target_id = None
+            self._g_should_execute = True
+        elif g_action.target_id != self._g_decision_target_id:
+            self._g_decision_target_id = g_action.target_id
+            self._g_should_execute = not getattr(self._behavior, "should_abandon_balloon_g", lambda: False)()
         actions_allowed = getattr(self._behavior, "actions_ready", lambda: True)()
         self._latest_g = g_action
 
@@ -95,7 +105,7 @@ class BalloonExecutor:
                 ):
                     self._g_scheduler.cancel()
 
-        if self._g_visible and self._g_scheduler.is_idle and input_enabled and actions_allowed:
+        if self._g_visible and self._g_should_execute and self._g_scheduler.is_idle and input_enabled and actions_allowed:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
         g_completion = self._g_scheduler.tick(input_backend) if self._g_scheduler.active_action else None
@@ -122,6 +132,12 @@ class BalloonExecutor:
                     action = multicolor_specials[0]
                 elif actions:
                     action = actions[0]
+                if action is not None and action.target_type.value == "special_sequence_balloon":
+                    if action.target_id != self._special_fail_target_id:
+                        self._special_fail_target_id = action.target_id
+                        self._special_should_execute = not getattr(self._behavior, "should_fail_super_g", lambda: False)()
+                    if not self._special_should_execute:
+                        action = None
                 if action is not None:
                     if isinstance(action, TwinAction):
                         self._start_twin(action, region_left, region_top)
