@@ -119,6 +119,7 @@ class ActionScheduler:
                 action.timestamps.movement_start = now
                 action.phase = ActionPhase.MOVING
                 action.trajectory_index = 0
+                return None
 
         if action.phase == ActionPhase.MOVING:
             if not action.trajectory:
