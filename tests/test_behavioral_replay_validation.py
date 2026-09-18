@@ -1,3 +1,4 @@
+from telemetry.outcome import TimingCalibration
 from __future__ import annotations
 
 import time
@@ -55,6 +56,43 @@ class FakeInput:
 
 
 class TestBehavioralReplayValidation(unittest.TestCase):
+
+    def test_reaction_timing_keeps_perception_in_model_interval(self):
+        cfg = BehaviorConfig(enabled=True, seed=123)
+        action = BehavioralModel(cfg).plan_action(0, 0, 100, 100, 40)
+        self.assertAlmostEqual(action.reaction_time_s, action.intended_reaction_ticks / 60.0, places=9)
+        self.assertGreater(action.perception_ticks, 0.0)
+
+    def test_click_tick_modulo_is_modulo_three_and_skips_missing(self):
+        calibration = TimingCalibration()
+        calibration.record(intended_ticks=10, observed_ticks=8.0, wall_clock_error_ms=1.0)
+        calibration.record(intended_ticks=10, observed_ticks=None, wall_clock_error_ms=2.0)
+        self.assertEqual(calibration.click_tick_modulo, [2])
+        self.assertEqual(calibration.summary()["click_tick_modulo"]["count"], 1)
+
+    def test_fat_finger_event_scales_endpoint_noise(self):
+        from behavior.config import EndpointErrorConfig
+        profile = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=1.0, fat_finger_multiplier=2.0)
+        cfg = BehaviorConfig(enabled=True, seed=9, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=profile)
+        fat = BehavioralModel(cfg).plan_action(0, 0, 100, 100, 40)
+        normal_profile = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, fat_finger_multiplier=2.0)
+        normal = BehavioralModel(BehaviorConfig(enabled=True, seed=9, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=normal_profile)).plan_action(0, 0, 100, 100, 40)
+        self.assertAlmostEqual(fat.endpoint_error_px, normal.endpoint_error_px * 2.0, places=6)
+
+    def test_duo_y_variance_multiplier(self):
+        from behavior.config import EndpointErrorConfig
+        base = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, duo_y_variance_multiplier=1.0)
+        duo = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, duo_y_variance_multiplier=2.0)
+        a = BehavioralModel(BehaviorConfig(enabled=True, seed=11, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=base)).plan_action(0,0,100,100,40,target_metadata={"is_twin":False})
+        b = BehavioralModel(BehaviorConfig(enabled=True, seed=11, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=duo)).plan_action(0,0,100,100,40,target_metadata={"is_twin":True})
+        self.assertAlmostEqual(b.click_position[0] - 100.0, a.click_position[0] - 100.0, places=6)
+        self.assertAlmostEqual(b.click_position[1] - 100.0, 2.0 * (a.click_position[1] - 100.0), places=6)
+
+    def test_early_exit_probability_is_sampled_once(self):
+        profile = HumanProfileConfig(early_exit_prob_min=1.0, early_exit_prob_max=1.0, early_exit_ratio_min=0.5, early_exit_ratio_max=0.5)
+        model = BehavioralModel(BehaviorConfig(enabled=True, seed=4, human_profile=profile))
+        model.start_session()
+        self.assertFalse(model.should_early_exit(10.0))
     def test_scheduler_uses_behavioral_endpoint_not_center(self):
         scheduler = ActionScheduler()
         action = make_action(123.4, 234.6)
