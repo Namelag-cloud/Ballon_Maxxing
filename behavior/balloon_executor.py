@@ -75,6 +75,8 @@ class BalloonExecutor:
     def tick(self, actions, g_action, input_backend, region_left, region_top, input_enabled, notifications=(), multicolor_specials=(), duration_s=None) -> BalloonExecutionResult:
         now = self._clock()
         self._g_visible = g_action is not None
+        if self._diagnostic:
+            self._diagnostic.log("executor_frame", now=now, actions=[self._action_info(a) for a in actions], g_action=self._action_info(g_action), notifications=[self._action_info(a) for a in notifications], multicolor_specials=[self._action_info(a) for a in multicolor_specials], input_enabled=input_enabled, active_primary=self._active_info(self._primary_scheduler.active_action), active_twin=self._active_twin_info(), active_g=self._active_info(self._g_scheduler.active_action), idle_until=self._idle_until)
         if g_action is None:
             self._g_decision_target_id = None
             self._g_should_execute = True
@@ -83,6 +85,8 @@ class BalloonExecutor:
             self._g_should_execute = not getattr(self._behavior, "should_abandon_balloon_g", lambda: False)()
         actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
         self._latest_g = g_action
+        if self._diagnostic:
+            self._diagnostic.log("behavior_gate", gate="new_action", allowed=actions_allowed, **self._behavior_gate_state(duration_s))
 
         clicks = 0
         input_timestamp = None
@@ -107,6 +111,8 @@ class BalloonExecutor:
                 ):
                     self._g_scheduler.cancel()
 
+        if self._g_visible and self._diagnostic:
+            self._diagnostic.log("action_start_attempt", lane="g", target=self._action_info(self._latest_g), accepted=self._g_should_execute and self._g_scheduler.is_idle and input_enabled and actions_allowed, reason=self._g_start_block_reason(input_enabled, actions_allowed))
         if self._g_visible and self._g_should_execute and self._g_scheduler.is_idle and input_enabled and actions_allowed:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
@@ -123,6 +129,8 @@ class BalloonExecutor:
             self._start_single(self._g_scheduler, self._latest_g, region_left, region_top)
 
         actions_allowed = getattr(self._behavior, "should_start_new_action", lambda _duration: True)(duration_s)
+        if self._diagnostic:
+            self._diagnostic.log("executor_gate", idle_gap_open=now >= self._idle_until, idle_until=self._idle_until, primary_idle=self._primary_scheduler.is_idle, twin_idle=self._twin_scheduler.is_idle, actions_allowed=actions_allowed, input_enabled=input_enabled)
         if now >= self._idle_until and self._twin_scheduler.is_idle and self._primary_scheduler.is_idle and actions_allowed:
             if input_enabled:
                 action = None
@@ -140,6 +148,10 @@ class BalloonExecutor:
                         self._special_should_execute = not getattr(self._behavior, "should_fail_super_g", lambda: False)()
                     if not self._special_should_execute:
                         action = None
+                if action is not None and self._diagnostic:
+                    self._diagnostic.log("action_start_attempt", lane="primary_or_twin", target=self._action_info(action), accepted=True, reason=None)
+                elif action is None and self._diagnostic:
+                    self._diagnostic.log("action_start_attempt", lane="primary_or_twin", target=None, accepted=False, reason="no_selectable_action_or_behavioral_special_failure")
                 if action is not None:
                     if isinstance(action, TwinAction):
                         self._start_twin(action, region_left, region_top)
