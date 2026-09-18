@@ -283,6 +283,7 @@ class BalloonExecutor:
         input_timestamp = None
         action_timestamps = None
         twin_completion = None
+        g_completed = False
         completed_primary_action = None
         outcomes: list[SessionOutcome] = []
 
@@ -291,7 +292,9 @@ class BalloonExecutor:
             g_behavior = self._fast_behavioral_action(g_screen, g_action.target_width)
             g_ts = self._fast_click(input_backend, g_screen)
             clicks += 1
+            g_completed = True
             input_timestamp = g_ts.click_up
+            action_timestamps = g_ts
             outcomes.append(
                 self._make_outcome(
                     g_behavior,
