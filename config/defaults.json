@@ -160,7 +160,11 @@
       "perception_min_ticks": 2.0,
       "perception_max_ticks": 5.0,
       "duo_delta_sigma": 0.4,
-      "fat_finger_sigma_pct": 0.025
+      "duo_y_variance_multiplier": 1.5,
+      "fat_finger_probability": 0.02,
+      "fat_finger_multiplier": 2.0,
+      "gemini_without_notification_probability": 0.01,
+      "final_activity_cutoff_s": 1.5
     }
   }
 }
