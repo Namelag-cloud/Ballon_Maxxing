@@ -16,6 +16,8 @@ class SessionOutcome:
     dispatch_ts: Optional[float] = None
     observed_pop_ts: Optional[float] = None
     estimated_reaction_ticks: Optional[float] = None
+    click_tick_modulo: Optional[int] = None
+    timing_error_ms: Optional[float] = None
     screen_click_x: Optional[int] = None
     screen_click_y: Optional[int] = None
     world_x_estimate: Optional[float] = None
