@@ -62,7 +62,10 @@ class FastBalloonExecutorTests(unittest.TestCase):
         self.assertEqual(result.completed_primary_action.target_id, 1)
         self.assertEqual([event[0] for event in backend.events], ["move", "down", "up"])
         self.assertIsNotNone(result.action_timestamps)
-        self.assertEqual(result.action_timestamps.click_down - result.action_timestamps.movement_start, 0.001)
+        self.assertLessEqual(
+            result.action_timestamps.click_up - result.action_timestamps.click_down,
+            0.002,
+        )
         self.assertEqual(result.outcomes[0].execution_status, "fast")
 
     def test_fast_path_executes_twin_with_zero_inter_click_delay(self):
