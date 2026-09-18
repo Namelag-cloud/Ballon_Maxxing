@@ -164,6 +164,8 @@ class BalloonExecutor:
                     gemini_gate_result = getattr(self._behavior, "should_select_gemini_without_notification", lambda: False)()
                     if gemini_gate_result:
                         action = multicolor_specials[0]
+                    elif actions:
+                        action = actions[0]
                     if self._diagnostic:
                         self._diagnostic.log("gemini_gate", candidate_count=len(multicolor_specials), notification_count=0, selected=gemini_gate_result, reason="behavioral_gemini_without_notification_probability")
                 elif actions:
