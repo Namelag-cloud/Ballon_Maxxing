@@ -82,3 +82,30 @@ Do not commit large generated datasets or trained weights to the repository. Kee
 For a few thousand 96x96 crops, the first training run should normally be minutes rather than hours. CPU-only training can take tens of minutes depending on the machine; a CUDA-capable GPU should generally make small experiments much faster. The bigger time cost will be collecting representative false-positive examples.
 
 A useful expectation is 3-10 short train/evaluate iterations before deciding whether this approach is actually better than the hand-built geometry pipeline.
+
+
+## Collecting real screen candidates
+
+The first dataset should come from normal human gameplay, not synthetic screenshots.
+
+Run the collector from the repository root:
+
+```bash
+python main.py --mode collect --game balloons --fullscreen --startup-delay 5 --duration 180
+```
+
+Collection mode is **screen-capture only**. It disables mouse input and behavioral execution even if a custom config enables them. During the startup delay, switch to the game window. Then play normally and click whatever balloons you can.
+
+The collector runs the existing screen-only OpenCV detector and saves padded candidate patches under:
+
+```
+training/raw/session_YYYYMMDD_HHMMSS/
+    crops/
+    metadata.jsonl
+```
+
+Persistent candidates are sampled rather than saved every frame. A candidate can be sampled again after it moves or changes substantially. The raw session directory is gitignored.
+
+Do one short validation run first (about 60–120 seconds). Inspect the number and variety of crops before collecting the larger dataset. A useful first collection target is roughly **5–8 runs of 2–5 minutes each**, then label and inspect the class balance before collecting more.
+
+Important: the collector saves detector candidates, not automatic ground-truth labels. Human labeling remains the source of truth for `balloon`, `ui`, `notification`, and `unknown`.
