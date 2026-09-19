@@ -21,6 +21,7 @@ class BalloonTrack:
     first_seen: float
     last_seen: float
     clicked: bool = False
+    click_attempts: int = 0
     frames_missing: int = 0
     tracking_class: str | None = None
     metadata: dict = field(default_factory=dict)
@@ -113,6 +114,7 @@ class Tracker:
             tracking_class=det.tracking_class,
             metadata={
                 **dict(det.metadata),
+                "click_attempts": 0,
                 "temporal": {
                     "age_frames": 1,
                     "total_displacement_px": 0.0,
@@ -124,6 +126,19 @@ class Tracker:
             },
             age_frames=1,
         )
+
+    def mark_clicked(self, track_id: int) -> bool:
+        """Record an actual click attempt for a tracked target."""
+        track = self._tracks.get(track_id)
+        if track is None or track.tracking_class != "normal_balloon":
+            return False
+        track.clicked = True
+        track.click_attempts += 1
+        track.metadata = {
+            **dict(track.metadata),
+            "click_attempts": track.click_attempts,
+        }
+        return True
 
     def _update_track(self, track_id: int, det: Detection, now: float) -> None:
         track = self._tracks[track_id]
@@ -162,6 +177,7 @@ class Tracker:
         )
         track.metadata = {
             **dict(det.metadata),
+            "click_attempts": track.click_attempts,
             "temporal": {
                 "age_frames": track.age_frames,
                 "total_displacement_px": track.total_displacement_px,
