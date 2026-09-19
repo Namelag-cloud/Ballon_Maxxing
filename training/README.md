@@ -132,3 +132,32 @@ held-out support.
 If the model is useful but too expensive to run on every candidate, a later
 integration can restrict it to ambiguous candidates. No such integration is
 included in this experiment.
+
+
+## Experimental live ML vision path
+
+The trained MobileNet checkpoint can be enabled without changing the normal runtime path.
+
+The pipeline is:
+
+    MSS/OpenCV spatial candidates -> MobileNet semantic class -> balloon decision mechanics -> executor
+
+The classifier currently consumes the same padded candidate-crop geometry used by collection and predicts:
+balloon, duo, notification, super_g_ring, or ui.
+
+G-symbol and multicolor/Gemini geometry lanes remain on the existing detector because the current five-class dataset does not contain dedicated training labels for those classes.
+
+Enable the experimental path in PowerShell:
+
+    $env:GOOGLE_MAX_ML_VISION="1"
+    python main.py --mode dry-run --game balloons --fullscreen --duration 60 --no-gui --verbose-decisions
+
+Optional controls:
+
+    $env:GOOGLE_MAX_ML_THRESHOLD="0.70"
+    $env:GOOGLE_MAX_ML_BATCH_SIZE="16"
+    $env:GOOGLE_MAX_ML_CHECKPOINT="training/artifacts/mobilenet_v3_small.pt"
+
+The ML path is opt-in and the default runtime path is unchanged. Do not enable live input until a dry-run has been compared with the baseline.
+
+The classifier records candidate count and preprocessing/inference/total ML latency in the balloon profile telemetry.
