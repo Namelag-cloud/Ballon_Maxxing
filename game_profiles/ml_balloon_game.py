@@ -62,14 +62,17 @@ class MLBalloonGameProfile(BalloonGameProfile):
         self._last_profile["ml_candidate_count"] = len(candidates)
 
         result: list[dict] = []
+        rejected_count = 0
         for detection in classified:
             label = detection.get("ml_class")
             confidence = float(detection.get("ml_confidence", 0.0))
             metadata = dict(detection.get("metadata") or {})
 
             if confidence < self._ml_classifier.threshold:
+                rejected_count += 1
                 continue
             if label == "ui":
+                rejected_count += 1
                 continue
 
             if label == "notification":
@@ -105,6 +108,8 @@ class MLBalloonGameProfile(BalloonGameProfile):
             result.append(detection)
 
         self._assign_ml_duo_pairs(result)
+        self._last_profile["ml"]["accepted_count"] = len(result)
+        self._last_profile["ml"]["rejected_count"] = rejected_count
 
         # Preserve only the dedicated mechanics-only Gemini lane. It is not
         # allowed to override ML semantics for ordinary candidates.
