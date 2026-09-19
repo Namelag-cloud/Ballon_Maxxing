@@ -123,8 +123,14 @@ class BalloonDecisionEngine:
         for index, detection in enumerate(detections):
             target_type = detection.get("target_type")
             if target_type == TargetType.NORMAL_BALLOON.value:
-                temporal = detection.get("metadata", {}).get("temporal", {})
+                metadata = detection.get("metadata", {})
+                temporal = metadata.get("temporal", {})
                 if temporal.get("static_ui_suspect", False):
+                    continue
+                # Two actual click attempts with the target still detected are
+                # enough to classify a normal target as a persistent false positive.
+                # Twin/golden_duo targets use a separate lane and are exempt.
+                if int(metadata.get("click_attempts", 0)) >= 2:
                     continue
                 normal.append((index, detection))
             elif (
