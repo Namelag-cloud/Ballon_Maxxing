@@ -55,9 +55,9 @@ class TestBalloonVision(unittest.TestCase):
     def test_special_ring_is_not_color_priority(self):
         frame = np.full((900, 900, 3), 30, dtype=np.uint8)
         self._balloon(frame, (180, 250), 70, "blue", ring=True, ring_radius=90)
-        self._balloon(frame, (400, 250), 70, "red", ring=True, ring_radius=130)
-        self._balloon(frame, (620, 250), 70, "yellow", ring=True, ring_radius=130)
-        self._balloon(frame, (800, 250), 70, "green", ring=True, ring_radius=130)
+        self._balloon(frame, (400, 250), 70, "red", ring=True, ring_radius=90)
+        self._balloon(frame, (620, 250), 70, "yellow", ring=True, ring_radius=90)
+        self._balloon(frame, (800, 250), 70, "green", ring=True, ring_radius=90)
 
         detections = BalloonGameProfile().detect(frame)
         special = [d for d in detections if d["target_type"] == TargetType.SPECIAL_SEQUENCE_BALLOON.value]
