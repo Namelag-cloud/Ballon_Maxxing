@@ -4,10 +4,11 @@ import math
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from game_profiles.balloon_game import BalloonGameProfile
-from game_profiles.balloon_types import TargetType
+from game_profiles.balloon_types import BalloonColor, TargetDetection, TargetType, VisualFeatures
 
 
 class MLBalloonGameProfile(BalloonGameProfile):
@@ -36,12 +37,20 @@ class MLBalloonGameProfile(BalloonGameProfile):
 
     def detect(self, bgr_frame: np.ndarray) -> list[dict]:
         total_t0 = time.perf_counter()
-        candidates = self.detect_spatial_candidates(bgr_frame)
+        frame_height, frame_width = bgr_frame.shape[:2]
+        roi_left = frame_width // 3
+        roi_right = (frame_width * 2) // 3
+        ml_frame = bgr_frame[:, roi_left:roi_right]
+        candidates = self._detect_ml_spatial_candidates(ml_frame)
 
         classified = self._ml_classifier.classify_detections(
-            bgr_frame,
+            ml_frame,
             [d.as_dict() for d in candidates],
         )
+        classified = [
+            self._restore_screen_coordinates(detection, roi_left)
+            for detection in classified
+        ]
         self._last_profile["ml"] = dict(self._ml_classifier.last_stats)
         self._last_profile["ml_candidate_count"] = len(candidates)
 
@@ -109,6 +118,107 @@ class MLBalloonGameProfile(BalloonGameProfile):
         ) * 1000.0
         self._last_profile["total_ms"] = self._last_profile["ml_semantic_total_ms"]
         return result
+
+    def _detect_ml_spatial_candidates(
+        self,
+        bgr_frame: np.ndarray,
+    ) -> list[TargetDetection]:
+        """Generate only the cheap spatial evidence needed by the ML classifier.
+
+        This path intentionally does not reuse the legacy balloon semantic
+        detector. It operates on the middle third of the screen, builds simple
+        color/white masks, finds connected components, and applies only cheap
+        bbox/area gates before handing crops to MobileNet.
+        """
+        hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
+        min_area = int(self._settings.detection.min_area)
+        max_area = int(self._settings.detection.max_area)
+        candidates: list[TargetDetection] = []
+
+        for color_name in ("blue", "red", "yellow", "green"):
+            mask = self._classifier.make_color_mask(hsv, color_name)
+            count, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+            color = BalloonColor(color_name)
+            for label in range(1, count):
+                x, y, w, h, area = [int(v) for v in stats[label]]
+                if area < min_area or area > max_area or w <= 0 or h <= 0:
+                    continue
+                aspect = float(w) / float(h)
+                fill = float(area) / float(w * h)
+                if not (0.45 <= aspect <= 2.20 and 0.20 <= fill <= 1.05):
+                    continue
+                candidates.append(
+                    TargetDetection(
+                        target_type=TargetType.NORMAL_BALLOON,
+                        color=color,
+                        center=(x + w // 2, y + h // 2),
+                        bbox=(x, y, w, h),
+                        area=area,
+                        confidence=1.0,
+                        width=float(w),
+                        height=float(h),
+                        visual_features=VisualFeatures(),
+                        metadata={"spatial_source": "ml_cheap_color_component"},
+                    )
+                )
+
+        if "white" in self._settings.colors:
+            mask = self._classifier.make_color_mask(hsv, "white")
+            count, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+            for label in range(1, count):
+                x, y, w, h, area = [int(v) for v in stats[label]]
+                if area < min_area or area > max_area or w <= 0 or h <= 0:
+                    continue
+                aspect = float(w) / float(h)
+                fill = float(area) / float(w * h)
+                if not (0.45 <= aspect <= 2.20 and 0.20 <= fill <= 1.05):
+                    continue
+                candidates.append(
+                    TargetDetection(
+                        target_type=TargetType.NOTIFICATION,
+                        color=None,
+                        center=(x + w // 2, y + h // 2),
+                        bbox=(x, y, w, h),
+                        area=area,
+                        confidence=1.0,
+                        width=float(w),
+                        height=float(h),
+                        visual_features=VisualFeatures(),
+                        metadata={"spatial_source": "ml_cheap_white_component"},
+                    )
+                )
+
+        return candidates
+
+    @staticmethod
+    def _restore_screen_coordinates(detection: dict, roi_left: int) -> dict:
+        """Translate an ML detection from the middle-third ROI back to screen space."""
+        restored = dict(detection)
+        bbox = restored.get("bbox")
+        if bbox and len(bbox) >= 4:
+            restored["bbox"] = [
+                int(round(float(bbox[0]))) + roi_left,
+                int(round(float(bbox[1]))),
+                int(round(float(bbox[2]))),
+                int(round(float(bbox[3]))),
+            ]
+        center = restored.get("center")
+        if center and len(center) >= 2:
+            restored["center"] = [
+                int(round(float(center[0]))) + roi_left,
+                int(round(float(center[1]))),
+            ]
+        metadata = dict(restored.get("metadata") or {})
+        padded = metadata.get("ml_padded_bbox")
+        if padded and len(padded) >= 4:
+            metadata["ml_padded_bbox"] = [
+                int(round(float(padded[0]))) + roi_left,
+                int(round(float(padded[1]))),
+                int(round(float(padded[2]))),
+                int(round(float(padded[3])),
+            ]
+        restored["metadata"] = metadata
+        return restored
 
     @staticmethod
     def _assign_ml_duo_pairs(detections: list[dict]) -> None:
