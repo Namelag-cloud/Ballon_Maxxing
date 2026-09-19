@@ -43,6 +43,7 @@ class BalloonDecisionEngine:
             self._make_action(d)
             for d in visible
             if d.get("target_type") == TargetType.MULTICOLOR_SPECIAL.value
+            and d.get("metadata", {}).get("semantic_confirmed", False)
         ]
         notifications = [
             d for d in visible if d.get("target_type") == TargetType.NOTIFICATION.value
@@ -52,7 +53,11 @@ class BalloonDecisionEngine:
         # Do not invent notification state: absent a notification detection,
         # multicolor_specials remains telemetry-only.
         executable_specials: list[BalloonAction] = []
-        if notifications:
+        if notifications and not any(
+            d.get("target_type") == TargetType.TWIN_BALLOON.value
+            and d.get("metadata", {}).get("semantic_confirmed", False)
+            for d in visible
+        ):
             executable_specials = multicolor
             for action in executable_specials:
                 action.metadata["notification_count"] = len(notifications)
@@ -60,6 +65,7 @@ class BalloonDecisionEngine:
         special = [
             d for d in visible
             if d.get("target_type") == TargetType.SPECIAL_SEQUENCE_BALLOON.value
+            and d.get("metadata", {}).get("semantic_confirmed", False)
         ]
         if self.state.mode == GameMode.NORMAL_PLAY and not self.state.special_sequence_seen and special:
             self.state.mode = GameMode.SPECIAL_SEQUENCE
@@ -116,9 +122,10 @@ class BalloonDecisionEngine:
             target_type = detection.get("target_type")
             if target_type == TargetType.NORMAL_BALLOON.value:
                 normal.append((index, detection))
-            elif target_type == TargetType.TWIN_BALLOON.value and detection.get("color_name") in {
-                BalloonColor.YELLOW.value, BalloonColor.GREEN.value,
-            }:
+            elif (
+                target_type == TargetType.TWIN_BALLOON.value
+                and detection.get("metadata", {}).get("semantic_confirmed", False)
+            ):
                 twins.append((index, detection))
 
         pair = self._pair_twins(twins)
@@ -133,8 +140,8 @@ class BalloonDecisionEngine:
                         self._make_action(first_detection, is_twin=True),
                         self._make_action(second_detection, is_twin=True),
                     ),
-                    max_click_delta_ms=500.0,
-                    metadata={"max_click_delta_ms": 500.0},
+                    max_click_delta_ms=750.0,
+                    metadata={"max_click_delta_ms": 750.0},
                 ),
             ))
 
@@ -147,12 +154,10 @@ class BalloonDecisionEngine:
         if len(twins) != 2:
             return None
         (_, first), (_, second) = twins
-        if first.get("color_name") != second.get("color_name"):
+        if first.get("metadata", {}).get("semantic_pair_id") != second.get("metadata", {}).get("semantic_pair_id"):
             return None
         a, b = first.get("center"), second.get("center")
         if not a or not b:
-            return None
-        if hypot(a[0] - b[0], a[1] - b[1]) > float(self._settings.grouping.max_pair_distance):
             return None
         return twins[0], twins[1]
 
@@ -174,5 +179,6 @@ class BalloonDecisionEngine:
                 "confidence": detection.get("color_confidence", detection.get("confidence", 0.0)),
                 "bbox": detection.get("bbox"),
                 "first_seen_timestamp": detection.get("first_seen_timestamp"),
+                **dict(detection.get("metadata", {})),
             },
         )
