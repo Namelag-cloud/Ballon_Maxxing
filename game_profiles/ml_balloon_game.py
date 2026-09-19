@@ -37,7 +37,7 @@ class MLBalloonGameProfile(BalloonGameProfile):
 
     def detect(self, bgr_frame: np.ndarray) -> list[dict]:
         total_t0 = time.perf_counter()
-        frame_height, frame_width = bgr_frame.shape[:2]
+        _, frame_width = bgr_frame.shape[:2]
         roi_left = frame_width // 3
         roi_right = (frame_width * 2) // 3
         ml_frame = bgr_frame[:, roi_left:roi_right]
@@ -215,7 +215,7 @@ class MLBalloonGameProfile(BalloonGameProfile):
                 int(round(float(padded[0]))) + roi_left,
                 int(round(float(padded[1]))),
                 int(round(float(padded[2]))),
-                int(round(float(padded[3])),
+                int(round(float(padded[3])))
             ]
         restored["metadata"] = metadata
         return restored
