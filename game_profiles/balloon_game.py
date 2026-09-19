@@ -203,11 +203,16 @@ class BalloonGameProfile(GameProfile):
         # Expensive ring/Hough work is now reserved for a very small set of
         # newly-arrived, one-per-color candidates that could form the game's
         # single four-node Super-G. Ordinary balloons no longer pay this cost.
-        super_group = self._detect_super_g_group(normal_candidates)
+        super_group = self._detect_super_g_group(normal_candidates, bgr_frame)
         if super_group is not None:
             self._last_profile["semantic"]["super_g_confirmed"] = True
             self._last_profile["semantic"]["super_g_member_ids"] = [
                 d.center for d in super_group
+            ]
+            confirmed_by_center = {d.center: d for d in super_group}
+            normal_candidates = [
+                confirmed_by_center.get(d.center, d)
+                for d in normal_candidates
             ]
 
         classified: list[TargetDetection] = []
@@ -219,7 +224,13 @@ class BalloonGameProfile(GameProfile):
 
             metadata = dict(detection.metadata)
             color_key = detection.color.value
-            if self._super_group_matches(detection):
+            confirmed = next(
+                (d for d in super_group or [] if d.center == detection.center),
+                None,
+            )
+            if confirmed is not None or self._super_group_matches(detection):
+                if confirmed is not None:
+                    detection = confirmed
                 detection = replace(
                     detection,
                     target_type=TargetType.SPECIAL_SEQUENCE_BALLOON,
@@ -321,7 +332,11 @@ class BalloonGameProfile(GameProfile):
         pass
 
     def reset(self) -> None:
-        pass
+        self._semantic_frame = 0
+        self._candidate_history = []
+        self._super_group = None
+        self._super_group_age = 0
+        self._duo_pairs = []
 
     def _detect_color_components(
         self,
@@ -586,69 +601,71 @@ class BalloonGameProfile(GameProfile):
     def _detect_super_g_group(
         self,
         candidates: list[TargetDetection],
+        bgr_frame: np.ndarray,
     ) -> list[TargetDetection] | None:
-        """Confirm the four-node Super-G from a simultaneous candidate cohort.
+        """Confirm the engine's one four-node Super-G cohort.
 
-        The engine spawns exactly one blue/red/yellow/green node together.
-        Screen-only code cannot see spawnTick, so we use newly appearing
-        per-color candidates as the observable proxy and then require the
-        distinctive circular outline on all four members. This limits Hough work
-        to at most four candidates during a Super-G arrival instead of every
-        normal balloon every frame.
+        The engine creates exactly one blue/red/yellow/green node set at once.
+        Because spawnTick is not visible to a screen-only bot, a new-per-color
+        cohort is the observable temporal proxy. The expensive ring detector is
+        then applied only to those four candidates, rather than every ordinary
+        balloon.
         """
         if self._super_group is not None:
-            self._super_group_age += 1
             return None
 
+        color_values = {c.value for c in self._SUPER_G_COLORS}
         new_by_color: dict[str, TargetDetection] = {}
         for candidate in candidates:
             if not self._is_new_candidate(candidate):
                 continue
             color = candidate.color.value
-            if color not in {c.value for c in self._SUPER_G_COLORS}:
+            if color not in color_values or color in new_by_color:
                 continue
-            if color not in new_by_color:
-                new_by_color[color] = candidate
+            new_by_color[color] = candidate
 
-        if set(new_by_color) != {c.value for c in self._SUPER_G_COLORS}:
+        if set(new_by_color) != color_values:
             return None
 
         confirmed: list[TargetDetection] = []
         for candidate in new_by_color.values():
             self._last_profile["semantic"]["ring_candidates_considered"] += 1
-            ring = self._ring.detect(
-                # The current method receives HSV only, so this helper is called
-                # from detect where the BGR frame is not retained here.
-                # Ring evidence is therefore attached by _confirm_super_g_group.
-                np.zeros((1, 1, 3), dtype=np.uint8),
-                (0, 0, 1, 1),
-            )
-            # This placeholder is never used; actual ring confirmation happens
-            # in _confirm_super_g_group where the BGR frame is available.
-            _ = ring
-        return self._confirm_super_g_group(candidates, new_by_color)
+            ring = self._ring.detect(bgr_frame, candidate.bbox)
+            self._record_ring_profile(ring)
+            if not ring.detected:
+                return None
 
-    def _confirm_super_g_group(
-        self,
-        candidates: list[TargetDetection],
-        new_by_color: dict[str, TargetDetection],
-    ) -> list[TargetDetection] | None:
-        # RingDetector requires the original BGR frame. The semantic classifier
-        # therefore uses the cheap outline signal here and leaves renderer-
-        # specific ring confirmation to the caller when available.
-        # A complete four-color cohort is the source-grounded semantic gate.
-        if not all(
-            d.visual_features.white_border_ratio >= self._TWIN_WHITE_BORDER_RATIO
-            or d.visual_features.outline_contrast >= 30.0
-            for d in new_by_color.values()
-        ):
-            return None
+            confirmed.append(
+                replace(
+                    candidate,
+                    visual_features=replace(
+                        candidate.visual_features,
+                        ring_detected=True,
+                        ring_radius_ratio=ring.radius_ratio,
+                        ring_confidence=ring.confidence,
+                    ),
+                )
+            )
+
         self._super_group = {
-            color: tuple(map(float, detection.center))
-            for color, detection in new_by_color.items()
+            detection.color.value: tuple(map(float, detection.center))
+            for detection in confirmed
+            if detection.color is not None
         }
         self._super_group_age = 0
-        return list(new_by_color.values())
+        return confirmed
+
+    def _record_ring_profile(self, ring) -> None:
+        ring_profile = self._ring.last_profile
+        self._last_profile["ring_total_ms"] += float(ring_profile["total_ms"])
+        self._last_profile["ring_hough_ms"] += float(ring_profile["hough_ms"])
+        self._last_profile["ring_grayscale_ms"] += float(ring_profile["grayscale_ms"])
+        self._last_profile["ring_blur_ms"] += float(ring_profile["blur_ms"])
+        self._last_profile["ring_canny_ms"] += float(ring_profile["canny_ms"])
+        self._last_profile["ring_scoring_ms"] += float(ring_profile["scoring_ms"])
+        self._last_profile["ring_call_count"] += 1
+        self._last_profile["hough_call_count"] += int(ring_profile["hough_called"])
+        self._last_profile["ring_circles_returned"] += int(ring_profile["circles_returned"])
 
     def _super_group_matches(self, detection: TargetDetection) -> bool:
         if self._super_group is None or detection.color is None:
