@@ -29,3 +29,14 @@ def test_ml_profile_uses_spatial_boundary_not_parent_semantic_detect() -> None:
     assert "_detect_super_g_group(" not in source
     assert "_classify_golden_duos(" not in source
     assert "_g_detector" not in source
+
+
+def test_ml_profile_has_no_legacy_semantic_lane() -> None:
+    import inspect
+
+    source = inspect.getsource(MLBalloonGameProfile.detect)
+    assert "_detect_multicolor_special" not in source
+    assert "_detect_super_g_group" not in source
+    assert "_classify_golden_duos" not in source
+    assert "_g_detector" not in source
+    assert "semantic_source" in source

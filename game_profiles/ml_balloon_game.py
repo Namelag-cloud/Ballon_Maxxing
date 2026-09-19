@@ -38,22 +38,6 @@ class MLBalloonGameProfile(BalloonGameProfile):
         total_t0 = time.perf_counter()
         candidates = self.detect_spatial_candidates(bgr_frame)
 
-        # Gemini has no trained ML class yet. Keep this narrow mechanics-only
-        # observation so enabling ML does not silently remove an existing game
-        # object. It is not used to classify ordinary candidates.
-        hsv = self._last_hsv_frame
-        if hsv is None:
-            raise RuntimeError("Spatial candidate generation did not retain HSV frame")
-        notification_count = self._last_profile["notification_count"]
-        multicolor_t0 = time.perf_counter()
-        gemini = self._detect_multicolor_special(
-            hsv,
-            notification_count=notification_count,
-        )
-        self._last_profile["multicolor_ms"] = (
-            time.perf_counter() - multicolor_t0
-        ) * 1000.0
-
         classified = self._ml_classifier.classify_detections(
             bgr_frame,
             [d.as_dict() for d in candidates],
@@ -111,11 +95,10 @@ class MLBalloonGameProfile(BalloonGameProfile):
         self._last_profile["ml"]["accepted_count"] = len(result)
         self._last_profile["ml"]["rejected_count"] = rejected_count
 
-        # Preserve only the dedicated mechanics-only Gemini lane. It is not
-        # allowed to override ML semantics for ordinary candidates.
-        for detection in gemini:
-            result.append(detection.as_dict())
-
+        # ML is the sole semantic source for the ML runtime. Legacy Gemini,
+        # G-symbol, Super-G, and golden-duo semantic detectors are intentionally
+        # absent from this path. Notification/duo/super-G semantics come from
+        # the trained classifier above.
         result.sort(key=lambda d: (
             d.get("center", (0, 0))[1],
             d.get("center", (0, 0))[0],

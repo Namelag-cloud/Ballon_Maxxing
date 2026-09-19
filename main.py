@@ -314,6 +314,11 @@ class Application:
                 "ml_preprocess_ms": float(ml_stats.get("preprocess_ms", 0.0)),
                 "ml_inference_ms": float(ml_stats.get("inference_ms", 0.0)),
                 "ml_total_ms": float(ml_stats.get("total_ms", 0.0)),
+                "ml_candidate_count": int(ml_stats.get("candidate_count", 0)),
+                "ml_classified_count": int(ml_stats.get("classified_count", 0)),
+                "ml_accepted_count": int(ml_stats.get("accepted_count", 0)),
+                "ml_rejected_count": int(ml_stats.get("rejected_count", 0)),
+                "ml_class_counts": dict(ml_stats.get("class_counts") or {}),
             })
             if self._balloon_decision is not None:
                 t0 = now_monotonic()
@@ -351,6 +356,7 @@ class Application:
                 self._balloon_frame_decision = decision
                 self._decision_console.frame(self._frame_count + 1, current_detections, decision)
                 self._last_frame_stage_timings = {
+                    **self._last_frame_stage_timings,
                     "feedback_ms": feedback_ms,
                     "vision_ms": vision_ms,
                     "tracking_ms": tracking_ms,
@@ -656,6 +662,9 @@ class Application:
                             f" | ML prep: {timing.get('ml_preprocess_ms', 0.0):6.2f}ms"
                             f" | ML inf: {timing.get('ml_inference_ms', 0.0):6.2f}ms"
                             f" | ML total: {timing.get('ml_total_ms', 0.0):6.2f}ms"
+                            f" | ML cand: {timing.get('ml_candidate_count', 0)}"
+                            f" | ML accepted/rejected: {timing.get('ml_accepted_count', 0)}/{timing.get('ml_rejected_count', 0)}"
+                            f" | ML classes: {timing.get('ml_class_counts', {})}"
                         )
                     print(
                         f"Frame {self._frame_count:6d} | "
