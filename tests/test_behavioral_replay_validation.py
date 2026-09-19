@@ -155,19 +155,26 @@ class TestBehavioralReplayValidation(unittest.TestCase):
     def test_gemini_candidate_requires_observed_notification(self):
         engine = BalloonDecisionEngine(Settings())
         gemini = {
-            "target_type": TargetType.MULTICOLOR_SPECIAL.value, "color_name": "blue",
-            "center": (100, 100), "width": 40, "bbox": (80, 80, 40, 40), "confidence": 1.0,
+            "target_type": TargetType.MULTICOLOR_SPECIAL.value, "color_name": None,
+            "center": (100, 100), "width": 80, "bbox": (60, 60, 80, 80), "confidence": 1.0,
+            "metadata": {"semantic_confirmed": True, "semantic_class": "gemini"},
         }
         no_notification = engine.decide([gemini])
         self.assertEqual(len(no_notification.multicolor_specials), 1)
         self.assertEqual(no_notification.actions, ())
-        notification = {
-            "target_type": TargetType.NOTIFICATION.value, "color_name": "red",
-            "center": (200, 200), "width": 30, "bbox": (185, 185, 30, 30), "confidence": 1.0,
-        }
-        result = engine.decide([gemini, notification])
+        notifications = [
+            {
+                "target_type": TargetType.NOTIFICATION.value, "color_name": None,
+                "center": (200, 200), "width": 30, "bbox": (185, 185, 30, 30), "confidence": 1.0,
+            },
+            {
+                "target_type": TargetType.NOTIFICATION.value, "color_name": None,
+                "center": (250, 200), "width": 30, "bbox": (235, 185, 30, 30), "confidence": 1.0,
+            },
+        ]
+        result = engine.decide([gemini, *notifications])
         self.assertEqual(len(result.multicolor_specials), 1)
-        self.assertEqual(result.multicolor_specials[0].metadata["notification_count"], 1)
+        self.assertEqual(result.multicolor_specials[0].metadata["notification_count"], 2)
 
     def test_entropy_default_creates_session_seed(self):
         a = BehavioralModel(BehaviorConfig(enabled=True, seed=None))
