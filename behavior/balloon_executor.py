@@ -420,6 +420,7 @@ class BalloonExecutor:
             input_timestamp=input_timestamp,
             action_timestamps=action_timestamps,
             twin_completion=twin_completion,
+            g_click_completed=g_completed,
             completed_primary_action=completed_primary_action,
             outcomes=tuple(outcomes),
         )
