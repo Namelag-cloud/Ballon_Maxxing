@@ -109,6 +109,21 @@ def _draw_overlay(
     return canvas
 
 
+def _dataset_counts(entries: list[tuple[Path, Path, LabelStore]]) -> dict[str, int]:
+    """Count each label once per labeled crop, not once per entry referencing its store."""
+    counts = {label: 0 for label in LABEL_NAMES}
+    seen: set[tuple[Path, str]] = set()
+    for crop, session_dir, store in entries:
+        key = (session_dir, crop.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        label = store.get(crop.name)
+        if label is not None:
+            counts[label] += 1
+    return counts
+
+
 def _label_entries(entries: list[tuple[Path, Path, LabelStore]], *, window_name: str) -> int:
     if not entries:
         return 0
@@ -128,14 +143,7 @@ def _label_entries(entries: list[tuple[Path, Path, LabelStore]], *, window_name:
             if image is None:
                 raise RuntimeError(f"Could not read crop: {crop}")
 
-            counts = {
-                label: sum(
-                    1
-                    for entry_crop, _, entry_store in entries
-                    if entry_store.get(entry_crop.name) == label
-                )
-                for label in LABEL_NAMES
-            }
+            counts = _dataset_counts(entries)
             canvas = _draw_overlay(
                 image,
                 index,
@@ -149,7 +157,7 @@ def _label_entries(entries: list[tuple[Path, Path, LabelStore]], *, window_name:
             key = cv2.waitKeyEx(0)
 
             if key in (ord("q"), ord("Q"), 27):
-                return sum(len(store.labels) for _, _, store in entries)
+                return sum(_dataset_counts(entries).values())
 
             if key in LABEL_KEYS or key in {ord(c.upper()) for c in "bdgnuxs"}:
                 label = LABEL_KEYS.get(key)
