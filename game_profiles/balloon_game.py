@@ -1025,14 +1025,19 @@ class BalloonGameProfile(GameProfile):
                 break
 
         pair_ids: dict[tuple[float, float], str] = {}
+        pair_visual_metadata: dict[tuple[float, float], dict] = {}
         for first, second in pairs:
             ordered = sorted((first.center, second.center))
             pair_id = (
                 f"golden_duo:{ordered[0][0]}:{ordered[0][1]}:"
                 f"{ordered[1][0]}:{ordered[1][1]}"
             )
-            pair_ids[tuple(map(float, first.center))] = pair_id
-            pair_ids[tuple(map(float, second.center))] = pair_id
+            first_key = tuple(map(float, first.center))
+            second_key = tuple(map(float, second.center))
+            pair_ids[first_key] = pair_id
+            pair_ids[second_key] = pair_id
+            pair_visual_metadata[first_key] = dict(first.metadata)
+            pair_visual_metadata[second_key] = dict(second.metadata)
 
         self._duo_pairs = [
             {
@@ -1048,6 +1053,10 @@ class BalloonGameProfile(GameProfile):
             if pair_id is None:
                 result.append(detection)
                 continue
+            visual_metadata = pair_visual_metadata.get(
+                tuple(map(float, detection.center)),
+                {},
+            )
             result.append(
                 replace(
                     detection,
@@ -1055,6 +1064,7 @@ class BalloonGameProfile(GameProfile):
                     is_twin=True,
                     metadata={
                         **detection.metadata,
+                        **visual_metadata,
                         "semantic_class": "golden_duo",
                         "semantic_pair_id": pair_id,
                         "semantic_confirmed": True,
