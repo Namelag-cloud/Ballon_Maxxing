@@ -86,6 +86,7 @@ class BalloonGameProfile(GameProfile):
         self._super_group_age = 0
         self._super_g_terminal = False
         self._duo_pairs: list[dict] = []
+        self._color_component_hints: dict[str, list[tuple[tuple[int, int, int, int], int, tuple[float, float]]]] = {}
 
     @staticmethod
     def _empty_profile() -> dict:
@@ -169,6 +170,7 @@ class BalloonGameProfile(GameProfile):
         """Return structured detections serialized for the existing profile API."""
         total_t0 = time.perf_counter()
         self._last_profile = self._empty_profile()
+        self._color_component_hints = {color: [] for color in ("blue", "red", "yellow", "green")}
 
         hsv_t0 = time.perf_counter()
         hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
@@ -200,7 +202,10 @@ class BalloonGameProfile(GameProfile):
         self._last_profile["multicolor_ms"] = (time.perf_counter() - multicolor_t0) * 1000.0
 
         g_t0 = time.perf_counter()
-        g_detections = self._g_detector.detect(hsv)
+        g_detections = self._g_detector.detect(
+            hsv,
+            component_hints=self._color_component_hints,
+        )
         self._last_profile["g_detector_ms"] = (time.perf_counter() - g_t0) * 1000.0
 
         # G is a more specific multicolor geometry class. Do not let the generic
@@ -396,6 +401,10 @@ class BalloonGameProfile(GameProfile):
                 continue
             if w <= 0 or h <= 0:
                 continue
+
+            self._color_component_hints[color_name].append(
+                ((x, y, w, h), area, (x + w / 2.0, y + h / 2.0))
+            )
 
             mask_alloc_t0 = time.perf_counter()
             component_mask = np.zeros((h, w), dtype=np.uint8)
@@ -697,6 +706,7 @@ class BalloonGameProfile(GameProfile):
         # The engine guarantees at most one active Gemini. If visual segmentation
         # produces several multicolor components, retain only the strongest/largest
         # plausible candidate rather than emitting multiple Geminis.
+        self._last_profile["semantic"]["gemini_candidates"] = len(detections)
         detections.sort(
             key=lambda d: (max(d.width, d.height), d.confidence),
             reverse=True,
