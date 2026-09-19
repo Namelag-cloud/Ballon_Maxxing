@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from training.label_candidates import LabelStore, load_crops
+from training.label_candidates import LabelStore, discover_sessions, load_crops
 
 
 class TestLabelStore(unittest.TestCase):
@@ -57,14 +57,45 @@ class TestLabelStore(unittest.TestCase):
 
 
 class TestLoadCrops(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
     def test_returns_supported_images_only(self):
-        crop_dir = Path(tempfile.mkdtemp(dir=self.tmp_path))
+        session_dir = self.tmp_path / "session"
+        crop_dir = session_dir / "crops"
+        crop_dir.mkdir(parents=True)
         (crop_dir / "b.png").write_bytes(b"")
         (crop_dir / "a.jpg").write_bytes(b"")
         (crop_dir / "notes.txt").write_text("ignore", encoding="utf-8")
         self.assertEqual(
-            [path.name for path in load_crops(crop_dir.parent)],
+            [path.name for path in load_crops(session_dir)],
             ["a.jpg", "b.png"],
+        )
+
+
+class TestDiscoverSessions(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_finds_only_directories_with_crops(self):
+        root = self.tmp_path / "raw"
+        root.mkdir()
+        (root / "session_1" / "crops").mkdir(parents=True)
+        (root / "session_2" / "crops").mkdir(parents=True)
+        (root / "not_a_session").mkdir()
+        (root / "file.txt").write_text("ignore", encoding="utf-8")
+
+        self.assertEqual(
+            [path.name for path in discover_sessions(root)],
+            ["session_1", "session_2"],
         )
 
 
