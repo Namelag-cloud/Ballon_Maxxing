@@ -98,7 +98,7 @@ The first dataset should come from normal human gameplay, not synthetic screensh
 
 Run the collector from the repository root:
 
-```bash
+```powershell
 python main.py --mode collect --game balloons --fullscreen --startup-delay 5 --duration 180
 ```
 
@@ -121,13 +121,43 @@ Important: the collector saves detector candidates, not automatic ground-truth l
 
 ## Human labeling
 
-After a collector validation run, label the saved crops before collecting a large dataset:
+You can label a single session if you want:
 
 ```powershell
 python training/label_candidates.py training/raw/session_YYYYMMDD_HHMMSS
 ```
 
-The labeler shows one candidate crop at a time and persists progress to:
+Or, for the normal workflow, label **everything collected so far** in one continuous queue:
+
+```powershell
+python training/label_candidates.py
+```
+
+With no argument, the labeler uses `training/raw`. You can also pass the root explicitly:
+
+```powershell
+python training/label_candidates.py training/raw
+```
+
+The dataset-wide mode:
+
+- discovers every session under `training/raw` that contains a `crops/` directory;
+- keeps each session's labels in its own `labels.json`;
+- presents all session crops in one continuous queue;
+- starts at the first unlabeled crop;
+- automatically advances after a label is chosen;
+- resumes correctly if you quit and run the command again;
+- leaves already-labeled crops alone.
+
+For example, if you collect five sessions before labeling, you only need to run:
+
+```powershell
+python training/label_candidates.py
+```
+
+once. You do not need to provide five session paths manually.
+
+Each session stores its labels at:
 
 ```
 training/raw/session_YYYYMMDD_HHMMSS/labels.json
@@ -145,6 +175,6 @@ Keys:
 - Left/Right — navigate
 - `Q` or `Esc` — quit and save
 
-Already-labeled crops are skipped when the session is resumed. The labels are human ground truth; detector metadata is only context and is not treated as a label. For a Super-G crop, use `G` only when the active ring is visible; otherwise use the appropriate ordinary/special class based on what is actually visible.
+Already-labeled crops are skipped when the dataset is resumed. The labels are human ground truth; detector metadata is only context and is not treated as a label. For a Super-G crop, use `G` only when the active ring is visible; otherwise use the appropriate ordinary/special class based on what is actually visible.
 
 Do not copy the first 25-crop validation run directly into train/val/test yet. First inspect whether the collector is producing useful, varied candidates. After several collection sessions have been labeled, build the dataset with care to avoid near-duplicate frames leaking across train/validation/test.
