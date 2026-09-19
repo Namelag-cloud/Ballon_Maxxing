@@ -70,6 +70,7 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             "candidate_counts",
             "candidate_geometry",
             "ring_circles_returned",
+            "score_ui_rejections",
             "semantic",
         }
         self.assertTrue(required.issubset(first_profile))
@@ -83,13 +84,14 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             "hough_call_count",
             "component_count",
             "ring_circles_returned",
+            "score_ui_rejections",
             "semantic",
             "candidate_geometry",
         }
         for key in timing_keys:
             self.assertGreaterEqual(first_profile[key], 0.0)
 
-        for key in ("normal_candidate_count", "ring_call_count", "hough_call_count", "component_count", "ring_circles_returned"):
+        for key in ("normal_candidate_count", "ring_call_count", "hough_call_count", "component_count", "ring_circles_returned", "score_ui_rejections"):
             self.assertIsInstance(first_profile[key], int)
             self.assertGreaterEqual(first_profile[key], 0)
 
