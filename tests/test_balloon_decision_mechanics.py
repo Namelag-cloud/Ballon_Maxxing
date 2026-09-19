@@ -211,8 +211,9 @@ class TestBalloonDecisionMechanics(unittest.TestCase):
         ])
 
         self.assertEqual(result.mode, GameMode.SPECIAL_SEQUENCE)
-        self.assertIsNotNone(result.g_action)
-        self.assertEqual(result.g_action.target_type, TargetType.G_SYMBOL)
+        # Super-G is exclusive while the ordered sequence is active; the
+        # G-symbol lane must not interleave with the required node.
+        self.assertIsNone(result.g_action)
         self.assertEqual(len(result.actions), 1)
         self.assertEqual(result.actions[0].target_id, 71)
 
