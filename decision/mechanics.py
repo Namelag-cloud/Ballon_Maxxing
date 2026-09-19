@@ -78,7 +78,9 @@ class BalloonDecisionEngine:
             actions = self._select_normal_play(visible)
 
         if executable_specials:
-            actions = list(actions) + executable_specials
+            # Gemini consumes all active notifications when clicked, so a confirmed
+            # Gemini must not be starved behind ordinary balloons in the action lane.
+            actions = executable_specials + list(actions)
 
         notification_actions = tuple(self._make_action(d) for d in notifications)
 
@@ -121,6 +123,9 @@ class BalloonDecisionEngine:
         for index, detection in enumerate(detections):
             target_type = detection.get("target_type")
             if target_type == TargetType.NORMAL_BALLOON.value:
+                temporal = detection.get("metadata", {}).get("temporal", {})
+                if temporal.get("static_ui_suspect", False):
+                    continue
                 normal.append((index, detection))
             elif (
                 target_type == TargetType.TWIN_BALLOON.value

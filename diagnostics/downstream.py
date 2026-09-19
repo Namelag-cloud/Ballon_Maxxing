@@ -18,6 +18,8 @@ class DownstreamDiagnostic:
         self._frame_log_duration_ms = 0.0
         self._event_counts: dict[str, int] = {}
         self._click_decision_latencies_ms: list[float] = []
+        self._click_to_next_capture_ms: list[float] = []
+        self._click_to_next_decision_ms: list[float] = []
         self._followup_status_counts: dict[str, int] = {}
         self._state_transition_count = 0
 
@@ -38,6 +40,12 @@ class DownstreamDiagnostic:
                 if isinstance(latency, (int, float)):
                     self._click_decision_latencies_ms.append(float(latency))
             elif event == "click_followup":
+                capture_latency = data.get("click_to_next_capture_ms")
+                decision_latency = data.get("click_to_next_decision_ms")
+                if isinstance(capture_latency, (int, float)):
+                    self._click_to_next_capture_ms.append(float(capture_latency))
+                if isinstance(decision_latency, (int, float)):
+                    self._click_to_next_decision_ms.append(float(decision_latency))
                 status = data.get("status")
                 if status is not None:
                     self._followup_status_counts[str(status)] = self._followup_status_counts.get(str(status), 0) + 1
@@ -61,6 +69,8 @@ class DownstreamDiagnostic:
             "diagnostic_summary",
             event_counts=dict(self._event_counts),
             click_decision_latency_ms=self._stats(self._click_decision_latencies_ms),
+            click_to_next_capture_ms=self._stats(self._click_to_next_capture_ms),
+            click_to_next_decision_ms=self._stats(self._click_to_next_decision_ms),
             click_followup_status_counts=dict(self._followup_status_counts),
             state_transition_count=self._state_transition_count,
         )
