@@ -860,7 +860,14 @@ class Application:
                     "click_down_ts": outcome.actual_click_down_ts,
                 }
 
-    def _log_click_followups(self, current_detections, *, frame_id: int) -> None:
+    def _log_click_followups(
+        self,
+        current_detections,
+        *,
+        frame_id: int,
+        capture_ts: float,
+        decision_ready_ts: float,
+    ) -> None:
         if not self._pending_click_observations:
             return
         by_id = {d.get("target_id"): d for d in current_detections}
@@ -882,6 +889,16 @@ class Application:
                 "target_type": context["target_type"],
                 "target_color": context["color"],
                 "status": "present_next_frame" if observed is not None else "absent_next_frame",
+                "click_to_next_capture_ms": (
+                    (capture_ts - context["click_down_ts"]) * 1000.0
+                    if context.get("click_down_ts") is not None
+                    else None
+                ),
+                "click_to_next_decision_ms": (
+                    (decision_ready_ts - context["click_down_ts"]) * 1000.0
+                    if context.get("click_down_ts") is not None
+                    else None
+                ),
             }
             if observed is not None:
                 payload.update({
@@ -897,6 +914,14 @@ class Application:
                     "nearest_same_color_id": nearest_same.get("target_id"),
                 })
             self._diagnostic.log("click_followup", **payload)
+            self._diagnostic.log(
+                "click_loop_latency",
+                target_id=target_id,
+                click_to_next_capture_ms=payload["click_to_next_capture_ms"],
+                click_to_next_decision_ms=payload["click_to_next_decision_ms"],
+                click_frame_id=context["click_frame_id"],
+                followup_frame_id=frame_id,
+            )
             del self._pending_click_observations[target_id]
 
     @staticmethod
