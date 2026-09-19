@@ -16,12 +16,21 @@ def test_collect_mode_cli_parses():
     assert args.duration == 120.0
 
 
-def test_live_candidate_recording_cli_parses():
+def test_live_click_recording_cli_parses():
+    args = parse_args([
+        "--mode", "live",
+        "--game", "balloons",
+        "--record-clicks",
+    ])
+    assert args.mode == "live"
+    assert args.game == "balloons"
+    assert args.record_candidates is True
+
+
+def test_legacy_candidate_recording_flag_remains_alias():
     args = parse_args([
         "--mode", "live",
         "--game", "balloons",
         "--record-candidates",
     ])
-    assert args.mode == "live"
-    assert args.game == "balloons"
     assert args.record_candidates is True
