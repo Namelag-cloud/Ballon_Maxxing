@@ -19,7 +19,7 @@ class _MouseHookStruct(ctypes.Structure):
         ("mouseData", ctypes.wintypes.DWORD),
         ("flags", ctypes.wintypes.DWORD),
         ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.wintypes.ULONG_PTR),
+        ("dwExtraInfo", ctypes.c_size_t),
     ]
 
 try:
