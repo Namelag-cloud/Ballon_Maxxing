@@ -19,7 +19,6 @@ from vision.g_symbol_detector import GSymbolDetector
 from vision.outline_detector import OutlineDetector, OutlineResult
 from vision.detector import Detection
 from vision.ring_detector import RingDetector
-from vision.ocr_detector import OCRDetector, OCRSnapshot
 
 
 class BalloonGameProfile(GameProfile):
@@ -47,7 +46,7 @@ class BalloonGameProfile(GameProfile):
     # rounded/irregular UI shapes that can otherwise pass bbox circularity.
     _MAX_BOUNDARY_RADIAL_CV = 0.10
     # The score counter is static in the game UI. Keep this as a very small
-    # geometry+position guard rather than OCR or a full-screen text detector.
+    # geometry+position guard for the known static score-counter region.
     # A real balloon is roughly square; the observed score glyph region is
     # materially taller/narrower.
     _SCORE_UI_REGION = (960, 220, 1120, 370)
@@ -106,8 +105,6 @@ class BalloonGameProfile(GameProfile):
         self._super_g_terminal = False
         self._duo_pairs: list[dict] = []
         self._last_hsv_frame: np.ndarray | None = None
-        self._ocr = OCRDetector()
-        self._ocr_snapshot = OCRSnapshot((), -1, 0)
         self._color_component_hints: dict[str, list[tuple[tuple[int, int, int, int], int, tuple[float, float]]]] = {}
 
     @staticmethod
@@ -167,10 +164,6 @@ class BalloonGameProfile(GameProfile):
             "notification_ms": 0.0,
             "notification_count": 0,
             "notification_halo_candidates": 0,
-            "ocr_ms": 0.0,
-            "ocr_age_frames": 0,
-            "ocr_word_count": 0,
-            "ocr_rejections": 0,
             "semantic": {
                 "super_g_confirmed": False,
                 "super_g_member_ids": [],
@@ -199,11 +192,6 @@ class BalloonGameProfile(GameProfile):
         total_t0 = time.perf_counter()
         self._last_profile = self._empty_profile()
         self._last_hsv_frame = None
-        ocr_t0 = time.perf_counter()
-        self._ocr_snapshot = self._ocr.observe(bgr_frame, self._semantic_frame)
-        self._last_profile["ocr_ms"] = (time.perf_counter() - ocr_t0) * 1000.0
-        self._last_profile["ocr_age_frames"] = self._ocr_snapshot.age_frames
-        self._last_profile["ocr_word_count"] = len(self._ocr_snapshot.words)
         self._color_component_hints = {color: [] for color in ("blue", "red", "yellow", "green")}
 
         hsv_t0 = time.perf_counter()
@@ -215,7 +203,7 @@ class BalloonGameProfile(GameProfile):
 
         for color_name in ("blue", "red", "yellow", "green"):
             candidates.extend(
-                self._detect_color_components(hsv, color_name, self._ocr_snapshot)
+                self._detect_color_components(hsv, color_name)
             )
 
         notification_t0 = time.perf_counter()
@@ -243,33 +231,6 @@ class BalloonGameProfile(GameProfile):
             component_hints=self._color_component_hints,
         )
         self._last_profile["g_detector_ms"] = (time.perf_counter() - g_t0) * 1000.0
-
-        # OCR is also a safety veto for G-shaped colored UI glyphs. Genuine
-        # G-symbols do not contain numeric/UI text.
-        filtered_g: list[TargetDetection] = []
-        for detection in g_detections:
-            ocr_info = self._ocr.classify_bbox(
-                detection.bbox,
-                snapshot=self._ocr_snapshot,
-            )
-            if (
-                (ocr_info["ocr_numeric"] or ocr_info["ocr_ui_text"])
-                and not ocr_info["ocr_twin_text"]
-            ):
-                self._last_profile["ocr_rejections"] += 1
-                continue
-            filtered_g.append(
-                replace(
-                    detection,
-                    metadata={
-                        **detection.metadata,
-                        "ocr_text": list(ocr_info["ocr_text"]),
-                        "ocr_confidence": float(ocr_info["ocr_confidence"]),
-                        "ocr_age_frames": int(ocr_info["ocr_age_frames"] or 0),
-                    },
-                )
-            )
-        g_detections = filtered_g
 
         # G is a more specific multicolor geometry class. Do not let the generic
         # Gemini candidate shadow the same image region when both detectors fire.
@@ -433,7 +394,6 @@ class BalloonGameProfile(GameProfile):
         self,
         hsv: np.ndarray,
         color_name: str,
-        ocr_snapshot: OCRSnapshot | None = None,
     ) -> list[TargetDetection]:
         total_t0 = time.perf_counter()
         mask_t0 = time.perf_counter()
@@ -512,19 +472,6 @@ class BalloonGameProfile(GameProfile):
                 and aspect_ok
                 and (0.70 <= bbox_circle_fill <= 1.35 or touches_edge)
             ):
-                continue
-
-            # Full-screen OCR is a safety layer for colored UI text. OCR runs
-            # asynchronously; this only consumes the newest completed result.
-            ocr_info = self._ocr.classify_bbox(
-                (x, y, w, h),
-                snapshot=ocr_snapshot,
-            )
-            if (
-                (ocr_info["ocr_numeric"] or ocr_info["ocr_ui_text"])
-                and not ocr_info["ocr_twin_text"]
-            ):
-                self._last_profile["ocr_rejections"] += 1
                 continue
 
             mask_alloc_t0 = time.perf_counter()
@@ -653,13 +600,6 @@ class BalloonGameProfile(GameProfile):
                     height=float(h),
                     visual_features=visual,
                     metadata={
-                        "ocr_text": list(ocr_info["ocr_text"]),
-                        "ocr_confidence": float(ocr_info["ocr_confidence"]),
-                        "ocr_numeric": bool(ocr_info["ocr_numeric"]),
-                        "ocr_ui_text": bool(ocr_info["ocr_ui_text"]),
-                        "ocr_twin_text": bool(ocr_info["ocr_twin_text"]),
-                        "ocr_overlap": float(ocr_info["ocr_overlap"]),
-                        "ocr_age_frames": int(ocr_info["ocr_age_frames"] or 0),
                     },
                 )
             )
@@ -818,17 +758,6 @@ class BalloonGameProfile(GameProfile):
             if multicolor_score < 0.12:
                 continue
 
-            ocr_info = self._ocr.classify_bbox(
-                (x, y, w, h),
-                snapshot=self._ocr_snapshot,
-            )
-            if (
-                (ocr_info["ocr_numeric"] or ocr_info["ocr_ui_text"])
-                and not ocr_info["ocr_twin_text"]
-            ):
-                self._last_profile["ocr_rejections"] += 1
-                continue
-
             detections.append(
                 TargetDetection(
                     target_type=TargetType.MULTICOLOR_SPECIAL,
@@ -848,9 +777,6 @@ class BalloonGameProfile(GameProfile):
                         "semantic_class": "gemini",
                         "semantic_confirmed": True,
                         "notification_count": notification_count,
-                        "ocr_text": list(ocr_info["ocr_text"]),
-                        "ocr_confidence": float(ocr_info["ocr_confidence"]),
-                        "ocr_age_frames": int(ocr_info["ocr_age_frames"] or 0),
                     },
                 )
             )
@@ -1059,11 +985,6 @@ class BalloonGameProfile(GameProfile):
                     second_text_score = self._twin_text_likeness(
                         self._last_hsv_frame, second.bbox
                     )
-                    # Full-screen OCR is the primary text semantic signal.
-                    # Keep the old cheap pixel heuristic only as a fallback
-                    # when OCR has not recognized the tiny phrase yet.
-                    first_ocr_text_ok = bool(first.metadata.get("ocr_twin_text"))
-                    second_ocr_text_ok = bool(second.metadata.get("ocr_twin_text"))
                     visual_evidence_available = True
 
                 first_ring_ok = (
@@ -1076,12 +997,9 @@ class BalloonGameProfile(GameProfile):
                 )
                 first_text_ok = first_text_score >= self._TWIN_TEXT_MIN_SCORE
                 second_text_ok = second_text_score >= self._TWIN_TEXT_MIN_SCORE
-                if not visual_evidence_available:
-                    first_ocr_text_ok = second_ocr_text_ok = False
-
                 if visual_evidence_available and not (
-                    (first_ring_ok or first_text_ok or first_ocr_text_ok)
-                    and (second_ring_ok or second_text_ok or second_ocr_text_ok)
+                    (first_ring_ok or first_text_ok)
+                    and (second_ring_ok or second_text_ok)
                 ):
                     continue
 
