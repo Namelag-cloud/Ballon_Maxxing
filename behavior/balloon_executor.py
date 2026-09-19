@@ -52,6 +52,12 @@ class BalloonExecutor:
         self._idle_until = 0.0
         self._g_decision_target_id = None
         self._g_should_execute = True
+        # Fast execution can observe a popped balloon for another frame while
+        # the capture/render pipeline catches up. Keep a short-lived spatial
+        # click history so that stale normal-balloon detections are not clicked
+        # again. This is intentionally limited to normal balloons; twins and
+        # special/G targets have separate game mechanics.
+        self._recent_fast_clicks: list[tuple[float, int | None, tuple[int, int], float]] = []
         self._last_behavior_plan_ms = 0.0
 
     @property
@@ -337,6 +343,7 @@ class BalloonExecutor:
         # balloons can all be dispatched in this frame; a TwinAction remains
         # one atomic pair. Special-sequence mode still supplies at most one
         # action, so the strict B->R->Y->G order is preserved.
+        self._prune_recent_fast_clicks()
         seen_ids: set[int] = set()
         for action in actions:
             if isinstance(action, TwinAction):
@@ -410,6 +417,15 @@ class BalloonExecutor:
 
             if action.target_id is not None and action.target_id in seen_ids:
                 continue
+            if action.target_type.value == "normal_balloon" and self._was_recently_fast_clicked(action):
+                if self._diagnostic:
+                    self._diagnostic.log(
+                        "fast_click_suppressed",
+                        lane="primary",
+                        target=self._action_info(action),
+                        reason="recent_normal_target_click",
+                    )
+                continue
             screen_xy = self._to_screen(action.position, region_left, region_top)
             behavioral_action = self._fast_behavioral_action(
                 screen_xy,
@@ -432,6 +448,8 @@ class BalloonExecutor:
             )
             if action.target_id is not None:
                 seen_ids.add(action.target_id)
+            if action.target_type.value == "normal_balloon":
+                self._record_fast_click(action)
             if self._diagnostic:
                 self._diagnostic.log(
                     "fast_click",
@@ -448,6 +466,39 @@ class BalloonExecutor:
             g_click_completed=g_completed,
             completed_primary_action=completed_primary_action,
             outcomes=tuple(outcomes),
+        )
+
+    def _prune_recent_fast_clicks(self) -> None:
+        cutoff = self._clock() - 0.200
+        self._recent_fast_clicks = [entry for entry in self._recent_fast_clicks if entry[0] >= cutoff]
+
+    def _was_recently_fast_clicked(self, action: BalloonAction) -> bool:
+        if action.target_type.value != "normal_balloon":
+            return False
+        now = self._clock()
+        ax, ay = action.position
+        radius = max(12.0, float(action.target_width) * 0.5)
+        radius_sq = radius * radius
+        for clicked_at, target_id, (cx, cy), clicked_radius in self._recent_fast_clicks:
+            if now - clicked_at > 0.200:
+                continue
+            if target_id is not None and action.target_id == target_id:
+                return True
+            combined_radius = max(radius, clicked_radius)
+            dx = ax - cx
+            dy = ay - cy
+            if dx * dx + dy * dy <= combined_radius * combined_radius:
+                return True
+        return False
+
+    def _record_fast_click(self, action: BalloonAction) -> None:
+        self._recent_fast_clicks.append(
+            (
+                self._clock(),
+                action.target_id,
+                action.position,
+                max(12.0, float(action.target_width) * 0.5),
+            )
         )
 
     def _fast_click(self, input_backend, screen_xy: tuple[int, int]) -> ActionTimestamps:
