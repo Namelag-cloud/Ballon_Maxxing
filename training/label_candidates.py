@@ -18,6 +18,7 @@ LABEL_KEYS = {
     ord("s"): "skip",
 }
 LABEL_NAMES = tuple(dict.fromkeys(LABEL_KEYS.values()))
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
@@ -58,21 +59,40 @@ def load_crops(session_dir: Path) -> list[Path]:
     crop_dir = session_dir / "crops"
     if not crop_dir.is_dir():
         raise FileNotFoundError(f"Crop directory not found: {crop_dir}")
-    return sorted(p for p in crop_dir.iterdir() if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"})
+    return sorted(p for p in crop_dir.iterdir() if p.is_file() and p.suffix.lower() in _IMAGE_EXTENSIONS)
 
 
-def _draw_overlay(image, index: int, total: int, crop: Path, label: str | None, counts: dict[str, int]) -> Any:
+def discover_sessions(root: Path) -> list[Path]:
+    """Return every session directory containing a crops directory."""
+    if not root.is_dir():
+        raise FileNotFoundError(f"Training root not found: {root}")
+    return sorted(
+        path
+        for path in root.iterdir()
+        if path.is_dir() and (path / "crops").is_dir()
+    )
+
+
+def _draw_overlay(
+    image,
+    index: int,
+    total: int,
+    crop: Path,
+    label: str | None,
+    counts: dict[str, int],
+    session_dir: Path,
+) -> Any:
     display = image.copy()
     height, width = display.shape[:2]
     scale = max(1.0, min(5.0, 700.0 / max(height, width)))
     if scale != 1.0:
         display = cv2.resize(display, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
-    canvas = cv2.copyMakeBorder(display, 0, 96, 0, 0, cv2.BORDER_CONSTANT, value=(20, 20, 20))
+    canvas = cv2.copyMakeBorder(display, 0, 114, 0, 0, cv2.BORDER_CONSTANT, value=(20, 20, 20))
     lines = [
-        f"{index + 1}/{total}  {crop.name}",
+        f"{index + 1}/{total}  {session_dir.name}  {crop.name}",
         f"Current: {label or 'unlabeled'}",
-        f"B balloon  U ui  N notification  X unknown  S skip",
-        f"Left/Right navigate  Q quit/save",
+        "B balloon  D duo  G Super-G ring  U ui  N notification  X unknown  S skip",
+        "Left/Right navigate  Q quit/save",
         " | ".join(f"{name}:{counts[name]}" for name in LABEL_NAMES),
     ]
     for row, line in enumerate(lines):
@@ -89,30 +109,47 @@ def _draw_overlay(image, index: int, total: int, crop: Path, label: str | None, 
     return canvas
 
 
-def label_session(session_dir: Path, *, window_name: str = "Candidate Labeler") -> int:
-    crops = load_crops(session_dir)
-    if not crops:
-        raise ValueError(f"No candidate crops found in {session_dir / 'crops'}")
+def _label_entries(entries: list[tuple[Path, Path, LabelStore]], *, window_name: str) -> int:
+    if not entries:
+        return 0
 
-    store = LabelStore(session_dir / "labels.json")
-    index = next((i for i, crop in enumerate(crops) if store.get(crop.name) is None), 0)
+    index = next(
+        (i for i, (crop, _, store) in enumerate(entries) if store.get(crop.name) is None),
+        0,
+    )
 
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
 
     try:
         while True:
-            crop = crops[index]
+            crop, session_dir, store = entries[index]
             image = cv2.imread(str(crop))
             if image is None:
                 raise RuntimeError(f"Could not read crop: {crop}")
 
-            canvas = _draw_overlay(image, index, len(crops), crop, store.get(crop.name), store.counts())
+            counts = {
+                label: sum(
+                    1
+                    for entry_crop, _, entry_store in entries
+                    if entry_store.get(entry_crop.name) == label
+                )
+                for label in LABEL_NAMES
+            }
+            canvas = _draw_overlay(
+                image,
+                index,
+                len(entries),
+                crop,
+                store.get(crop.name),
+                counts,
+                session_dir,
+            )
             cv2.imshow(window_name, canvas)
             key = cv2.waitKeyEx(0)
 
             if key in (ord("q"), ord("Q"), 27):
-                return len(store.labels)
+                return sum(len(store.labels) for _, _, store in entries)
 
             if key in LABEL_KEYS or key in {ord(c.upper()) for c in "bdgnuxs"}:
                 label = LABEL_KEYS.get(key)
@@ -120,7 +157,7 @@ def label_session(session_dir: Path, *, window_name: str = "Candidate Labeler") 
                     label = LABEL_KEYS.get(key + 32)
                 if label is not None:
                     store.set(crop.name, label)
-                    if index < len(crops) - 1:
+                    if index < len(entries) - 1:
                         index += 1
                     continue
 
@@ -129,19 +166,60 @@ def label_session(session_dir: Path, *, window_name: str = "Candidate Labeler") 
                 continue
 
             if key in (83, 2555904):  # right arrow on common OpenCV backends
-                index = min(len(crops) - 1, index + 1)
+                index = min(len(entries) - 1, index + 1)
                 continue
     finally:
         cv2.destroyWindow(window_name)
 
 
+def label_session(session_dir: Path, *, window_name: str = "Candidate Labeler") -> int:
+    """Label one session. Kept for backwards-compatible single-session use."""
+    crops = load_crops(session_dir)
+    if not crops:
+        raise ValueError(f"No candidate crops found in {session_dir / 'crops'}")
+    store = LabelStore(session_dir / "labels.json")
+    entries = [(crop, session_dir, store) for crop in crops]
+    return _label_entries(entries, window_name=window_name)
+
+
+def label_root(root: Path, *, window_name: str = "Candidate Labeler") -> int:
+    """Label all candidate crops across every session under root."""
+    sessions = discover_sessions(root)
+    if not sessions:
+        raise ValueError(f"No session directories with crops found in {root}")
+
+    entries: list[tuple[Path, Path, LabelStore]] = []
+    for session_dir in sessions:
+        store = LabelStore(session_dir / "labels.json")
+        crops = load_crops(session_dir)
+        entries.extend((crop, session_dir, store) for crop in crops)
+
+    if not entries:
+        raise ValueError(f"No candidate crops found under {root}")
+
+    return _label_entries(entries, window_name=window_name)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Human-label candidate crops from a collector session.")
-    parser.add_argument("session", type=Path, help="training/raw/session_YYYYMMDD_HHMMSS")
+    parser = argparse.ArgumentParser(
+        description="Human-label candidate crops across one session or the whole training/raw dataset."
+    )
+    parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("training/raw"),
+        help="session directory or dataset root (default: training/raw)",
+    )
     args = parser.parse_args()
 
-    labeled = label_session(args.session)
-    print(f"Labeling saved: {args.session / 'labels.json'}")
+    if (args.path / "crops").is_dir():
+        labeled = label_session(args.path)
+        print(f"Labeling saved: {args.path / 'labels.json'}")
+    else:
+        labeled = label_root(args.path)
+        print(f"Dataset labeling saved under: {args.path}")
+
     print(f"Labeled/skipped entries: {labeled}")
 
 
