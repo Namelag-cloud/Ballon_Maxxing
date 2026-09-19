@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
+
+import numpy as np
 
 from vision.ocr_detector import OCRDetector, OCRSnapshot, OCRWord
 
@@ -8,6 +11,36 @@ from vision.ocr_detector import OCRDetector, OCRSnapshot, OCRWord
 class OCRDetectorTests(unittest.TestCase):
     def _snapshot(self, *words: OCRWord, age: int = 1) -> OCRSnapshot:
         return OCRSnapshot(tuple(words), completed_frame_id=10, age_frames=age)
+
+    def test_game_roi_crops_only_central_viewport(self):
+        detector = OCRDetector()
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        roi, origin_x, origin_y = detector._crop_game_roi(frame)
+
+        self.assertEqual(origin_x, 540)
+        self.assertEqual(origin_y, 75)
+        self.assertEqual(roi.shape, (815, 575, 3))
+
+    def test_ocr_word_coordinates_are_translated_back_to_screen_space(self):
+        detector = OCRDetector()
+        frame = np.zeros((20, 30, 3), dtype=np.uint8)
+        tesseract_data = {
+            "text": ["8"],
+            "conf": ["96.0"],
+            "left": [7],
+            "top": [9],
+            "width": [12],
+            "height": [14],
+        }
+
+        with patch(
+            "vision.ocr_detector.pytesseract.image_to_data",
+            return_value=tesseract_data,
+        ):
+            words = detector._run_ocr(frame, origin=(540, 75))
+
+        self.assertEqual(len(words), 1)
+        self.assertEqual(words[0].bbox, (547, 84, 12, 14))
 
     def test_numeric_ocr_rejects_colored_score_component(self):
         detector = OCRDetector()
