@@ -16,6 +16,10 @@ class DownstreamDiagnostic:
         self._stream = self.path.open("w", encoding="utf-8")
         self._seq = 0
         self._frame_log_duration_ms = 0.0
+        self._event_counts: dict[str, int] = {}
+        self._click_decision_latencies_ms: list[float] = []
+        self._followup_status_counts: dict[str, int] = {}
+        self._state_transition_count = 0
 
     @property
     def frame_log_duration_ms(self) -> float:
@@ -28,6 +32,17 @@ class DownstreamDiagnostic:
         t0 = time.perf_counter()
         try:
             self._seq += 1
+            self._event_counts[event] = self._event_counts.get(event, 0) + 1
+            if event == "click_context":
+                latency = data.get("decision_to_click_ms")
+                if isinstance(latency, (int, float)):
+                    self._click_decision_latencies_ms.append(float(latency))
+            elif event == "click_followup":
+                status = data.get("status")
+                if status is not None:
+                    self._followup_status_counts[str(status)] = self._followup_status_counts.get(str(status), 0) + 1
+            elif event == "decision_state_transition":
+                self._state_transition_count += 1
             record = {
                 "seq": self._seq,
                 "t_mono": time.perf_counter(),
@@ -40,8 +55,30 @@ class DownstreamDiagnostic:
             self._frame_log_duration_ms += (time.perf_counter() - t0) * 1000.0
 
     def close(self) -> None:
-        if not self._stream.closed:
-            self._stream.close()
+        if self._stream.closed:
+            return
+        self.log(
+            "diagnostic_summary",
+            event_counts=dict(self._event_counts),
+            click_decision_latency_ms=self._stats(self._click_decision_latencies_ms),
+            click_followup_status_counts=dict(self._followup_status_counts),
+            state_transition_count=self._state_transition_count,
+        )
+        self._stream.close()
+
+    @staticmethod
+    def _stats(values: list[float]) -> dict:
+        if not values:
+            return {"count": 0}
+        ordered = sorted(values)
+        n = len(ordered)
+        return {
+            "count": n,
+            "mean": sum(ordered) / n,
+            "min": ordered[0],
+            "median": ordered[n // 2] if n % 2 else (ordered[n // 2 - 1] + ordered[n // 2]) / 2,
+            "max": ordered[-1],
+        }
 
     @staticmethod
     def _jsonable(value: Any) -> Any:
