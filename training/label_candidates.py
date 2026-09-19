@@ -12,10 +12,12 @@ LABEL_KEYS = {
     ord("b"): "balloon",
     ord("u"): "ui",
     ord("n"): "notification",
+    ord("d"): "duo",
+    ord("g"): "super_g_ring",
     ord("x"): "unknown",
     ord("s"): "skip",
 }
-LABEL_NAMES = tuple(LABEL_KEYS.values())
+LABEL_NAMES = tuple(dict.fromkeys(LABEL_KEYS.values()))
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
@@ -112,7 +114,7 @@ def label_session(session_dir: Path, *, window_name: str = "Candidate Labeler") 
             if key in (ord("q"), ord("Q"), 27):
                 return len(store.labels)
 
-            if key in LABEL_KEYS or key in {ord(c.upper()) for c in "bunsx"}:
+            if key in LABEL_KEYS or key in {ord(c.upper()) for c in "bdgnuxs"}:
                 label = LABEL_KEYS.get(key)
                 if label is None:
                     label = LABEL_KEYS.get(key + 32)
