@@ -111,6 +111,16 @@ def balloon_action(
         "width": 20.0,
         "height": 20.0,
         "target_id": target_id,
+        "metadata": {
+            "semantic_confirmed": target_type in {
+                TargetType.SPECIAL_SEQUENCE_BALLOON,
+                TargetType.TWIN_BALLOON,
+                TargetType.MULTICOLOR_SPECIAL,
+            },
+            "semantic_pair_id": (
+                "integration-pair" if target_type == TargetType.TWIN_BALLOON else None
+            ),
+        },
     }
 
 
