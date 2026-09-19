@@ -36,6 +36,7 @@ from behavior.model import BehavioralModel
 from behavior.action_scheduler import ActionScheduler
 from behavior.balloon_executor import BalloonExecutor
 from diagnostics.downstream import DownstreamDiagnostic
+from diagnostics.decision_console import DecisionConsole
 
 
 def _balloon_action_to_click_actions(action: BalloonAction | TwinAction) -> list[ClickAction]:
@@ -123,6 +124,7 @@ class Application:
         startup_delay: float = 3.0,
         fast_execution: bool = False,
         diagnostics_enabled: bool = True,
+        verbose_decisions: bool = False,
     ) -> None:
         self._settings = settings
         self._running = True
@@ -138,6 +140,8 @@ class Application:
         self._vision = VisionPipeline(settings)
         self._tracker = Tracker(settings)
         self._selector = TargetSelector(settings)
+        self._verbose_decisions = verbose_decisions
+        self._decision_console = DecisionConsole(verbose_decisions)
         self._diagnostic = (
             DownstreamDiagnostic()
             if diagnostics_enabled
@@ -263,6 +267,7 @@ class Application:
                     )
                 decision_ms = (now_monotonic() - t0) * 1000.0
                 self._balloon_frame_decision = decision
+                self._decision_console.frame(self._frame_count + 1, current_detections, decision)
                 self._last_frame_stage_timings = {
                     "feedback_ms": feedback_ms,
                     "vision_ms": vision_ms,
@@ -612,6 +617,7 @@ class Application:
                         duration_s=self._duration,
                     )
                     executor_ms = (now_monotonic() - executor_t0) * 1000.0
+                    self._decision_console.execution(self._frame_count, execution)
                     if self._diagnostic:
                         self._diagnostic.log("executor_result", frame_id=self._frame_count, clicks_sent=execution.clicks_sent, completed_primary=self._action_info_for_diag(execution.completed_primary_action), twin_completed=execution.twin_completion is not None, g_completed=execution.g_click_completed, primary_active=self._active_info_for_diag(self._balloon_executor.primary_scheduler.active_action), twin_active=self._twin_active_for_diag(), g_active=self._active_info_for_diag(self._balloon_executor.g_scheduler.active_action), idle_until=self._balloon_executor._idle_until)
                         self._log_click_contexts(execution.outcomes, decision=self._balloon_frame_decision, frame_id=self._frame_count, current_detections=detections, tracks=tracks, decision_ready_ts=decision_ready_ts)
@@ -1091,6 +1097,8 @@ def main():
     print(f"Input enabled: {settings.input.enabled}")
     if settings.mode == RunMode.LIVE and args.startup_delay > 0:
         print(f"Startup delay: {args.startup_delay}s")
+    if args.verbose_decisions:
+        print("Verbose decisions: enabled")
     print()
 
     app = Application(
@@ -1100,6 +1108,7 @@ def main():
         startup_delay=args.startup_delay,
         fast_execution=args.fast,
         diagnostics_enabled=not args.no_diagnostics,
+        verbose_decisions=args.verbose_decisions,
     )
     app.run()
 
