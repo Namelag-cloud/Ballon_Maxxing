@@ -1012,28 +1012,40 @@ class BalloonGameProfile(GameProfile):
         bbox: tuple[int, int, int, int],
         component_mask: np.ndarray,
     ) -> float:
-        """Measure how consistently a colored component borders a light, low-saturation background."""
+        """Measure contrast in the immediate pixel shell surrounding a component."""
         x, y, w, h = bbox
         if component_mask.size == 0 or w <= 0 or h <= 0:
             return 0.0
 
-        dilated = cv2.dilate(component_mask, np.ones((3, 3), dtype=np.uint8), iterations=1)
-        shell = (dilated > 0) & (component_mask == 0)
+        pad = 2
+        x0 = max(0, x - pad)
+        y0 = max(0, y - pad)
+        x1 = min(hsv.shape[1], x + w + pad)
+        y1 = min(hsv.shape[0], y + h + pad)
+
+        region = hsv[y0:y1, x0:x1]
+        expanded_mask = np.zeros(region.shape[:2], dtype=np.uint8)
+        mx0 = x - x0
+        my0 = y - y0
+        expanded_mask[my0:my0 + h, mx0:mx0 + w] = component_mask
+
+        dilated = cv2.dilate(
+            expanded_mask,
+            np.ones((3, 3), dtype=np.uint8),
+            iterations=1,
+        )
+        shell = (dilated > 0) & (expanded_mask == 0)
         if not np.any(shell):
             return 0.0
 
-        region = hsv[y:y + h, x:x + w]
-        if region.shape[:2] != component_mask.shape:
-            return 0.0
-
         outside = region[shell]
-        inside = region[component_mask > 0]
+        inside = region[expanded_mask > 0]
         if outside.size == 0 or inside.size == 0:
             return 0.0
 
         # Balloons are saturated while their immediate background is usually
-        # light and low-saturation. Use robust medians rather than a single
-        # pixel so anti-aliased edges do not decide the result.
+        # light and low-saturation. Use robust pixel fractions so anti-aliased
+        # edges do not hinge the result on one sampled point.
         outside_light = (outside[:, 1] <= 70) & (outside[:, 2] >= 160)
         inside_colored = (inside[:, 1] >= 80) & (inside[:, 2] >= 80)
         outside_ratio = float(np.mean(outside_light))
