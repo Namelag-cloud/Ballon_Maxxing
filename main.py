@@ -6,6 +6,7 @@ import ctypes.wintypes
 import sys
 import time
 import threading
+import queue
 from typing import Optional
 
 try:
@@ -136,6 +137,7 @@ class Application:
         self._startup_delay = startup_delay
         self._fast_execution = fast_execution
         self._record_candidates = record_candidates
+        self._manual_clicks: queue.SimpleQueue[tuple[int, int]] = queue.SimpleQueue()
         self._start_time = now_monotonic()
         self._game_profile = game_profile
 
@@ -200,22 +202,41 @@ class Application:
         HK_ESC = 0x1B
         WH_KEYBOARD_LL = 13
 
+        WM_LBUTTONDOWN = 0x0201
+        WH_MOUSE_LL = 14
+
         def callback(nCode, wParam, lParam):
-            if nCode >= 0 and wParam in (0x0100, 0x0104):
-                vk = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_uint)).contents.value
-                if vk == HK_RSHIFT:
-                    self._input_enabled = not self._input_enabled
-                    print(f"[HOTKEY] Input {'ENABLED' if self._input_enabled else 'DISABLED'}")
-                elif vk == HK_ESC:
-                    print("[HOTKEY] ESC pressed, shutting down...")
-                    self._running = False
+            if nCode >= 0:
+                if wParam in (0x0100, 0x0104):
+                    vk = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_uint)).contents.value
+                    if vk == HK_RSHIFT:
+                        self._input_enabled = not self._input_enabled
+                        print(f"[HOTKEY] Input {'ENABLED' if self._input_enabled else 'DISABLED'}")
+                    elif vk == HK_ESC:
+                        print("[HOTKEY] ESC pressed, shutting down...")
+                        self._running = False
+                elif self._record_candidates and wParam == WM_LBUTTONDOWN:
+                    mouse = ctypes.cast(lParam, ctypes.POINTER(_MouseHookStruct)).contents
+                    if not (mouse.flags & 0x00000001):
+                        self._manual_clicks.put((int(mouse.pt_x), int(mouse.pt_y)))
             return user32.CallNextHookEx(None, nCode, wParam, ctypes.c_void_p(lParam))
 
-        hook_proc = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)(callback)
+        hook_proc = ctypes.WINFUNCTYPE(
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.wintypes.WPARAM,
+            ctypes.wintypes.LPARAM,
+        )(callback)
         user32 = ctypes.windll.user32
-        hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, None, 0)
-        if not hook:
+        keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, None, 0)
+        mouse_hook = None
+        if self._record_candidates:
+            mouse_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, hook_proc, None, 0)
+        if not keyboard_hook:
             print("[WARNING] Failed to install keyboard hook. Right Shift/ESC hotkeys unavailable.")
+        if self._record_candidates and not mouse_hook:
+            print("[WARNING] Failed to install mouse hook. Manual click recording unavailable.")
+        if not keyboard_hook and not mouse_hook:
             return
 
         msg = ctypes.wintypes.MSG()
@@ -226,7 +247,38 @@ class Application:
             else:
                 time.sleep(0.001)
 
-        user32.UnhookWindowsHookEx(hook)
+        if keyboard_hook:
+            user32.UnhookWindowsHookEx(keyboard_hook)
+        if mouse_hook:
+            user32.UnhookWindowsHookEx(mouse_hook)
+
+    def _drain_manual_clicks(
+        self,
+        frame: np.ndarray,
+        *,
+        frame_id: int,
+        region_left: int,
+        region_top: int,
+        collector: CandidateCollector | None,
+    ) -> int:
+        if collector is None:
+            return 0
+        saved = 0
+        while True:
+            try:
+                screen_x, screen_y = self._manual_clicks.get_nowait()
+            except queue.Empty:
+                break
+            if collector.collect_click(
+                frame,
+                screen_x=screen_x,
+                screen_y=screen_y,
+                region_left=region_left,
+                region_top=region_top,
+                frame_id=frame_id,
+            ):
+                saved += 1
+        return saved
 
     def _process_frame(self, frame: np.ndarray, capture_ts: float | None = None):
         t0 = now_monotonic()
@@ -599,9 +651,9 @@ class Application:
         if self._record_candidates:
             if self._game_profile is None or self._game_profile.game_type != GameType.BALLOON_GAME:
                 raise ValueError("--record-candidates currently requires --game balloons")
-            candidate_collector = CandidateCollector()
-            print("Candidate recording: ENABLED (screen capture only; clicks are unchanged)")
-            print(f"Saving candidate crops to: {candidate_collector.session_dir}")
+            candidate_collector = CandidateCollector(write_metadata=False)
+            print("Click recording: ENABLED (physical left clicks only; detector is NOT used)")
+            print(f"Saving click crops to: {candidate_collector.session_dir}")
 
         if not self._settings.input.enabled:
             print("WARNING: Live mode requested but input.enabled is False in config.")
@@ -615,6 +667,8 @@ class Application:
                 (self._input_backend._last_x, self._input_backend._last_y)
             )
 
+        if self._record_candidates:
+            print("Recording is independent of detector decisions: every physical left click is saved, with no deduplication.")
         print("Running LIVE mode - detecting AND clicking targets")
         if self._game_profile:
             print(f"Game profile: {self._game_profile.name}")
@@ -666,11 +720,12 @@ class Application:
                 frame, capture_ts = self._capture.grab()
                 detections, tracks, actions, game_actions = self._process_frame(frame, capture_ts)
                 if candidate_collector is not None:
-                    candidate_collector.collect_frame(
+                    self._drain_manual_clicks(
                         frame,
-                        detections,
                         frame_id=self._frame_count + 1,
-                        capture_timestamp=capture_ts,
+                        region_left=region.left,
+                        region_top=region.top,
+                        collector=candidate_collector,
                     )
                 decision_ready_ts = now_monotonic()
 
@@ -712,16 +767,6 @@ class Application:
                     if self._diagnostic:
                         self._diagnostic.log("executor_result", frame_id=self._frame_count, clicks_sent=execution.clicks_sent, completed_primary=self._action_info_for_diag(execution.completed_primary_action), twin_completed=execution.twin_completion is not None, g_completed=execution.g_click_completed, primary_active=self._active_info_for_diag(self._balloon_executor.primary_scheduler.active_action), twin_active=self._twin_active_for_diag(), g_active=self._active_info_for_diag(self._balloon_executor.g_scheduler.active_action), idle_until=self._balloon_executor._idle_until)
                         self._log_click_contexts(execution.outcomes, decision=self._balloon_frame_decision, frame_id=self._frame_count, current_detections=detections, tracks=tracks, decision_ready_ts=decision_ready_ts)
-                    if candidate_collector is not None:
-                        for outcome in execution.outcomes:
-                            candidate_collector.collect_click(
-                                frame,
-                                screen_x=outcome.screen_click_x,
-                                screen_y=outcome.screen_click_y,
-                                region_left=region.left,
-                                region_top=region.top,
-                                frame_id=self._frame_count,
-                            )
                     clicks_this_frame = execution.clicks_sent
                     if execution.input_timestamp is not None:
                         input_ts = execution.input_timestamp
@@ -772,15 +817,6 @@ class Application:
                         action_ts = completed
                         self._input_backend._last_x = self._action_scheduler.active_action.target_x if self._action_scheduler.active_action else self._input_backend._last_x
                         self._input_backend._last_y = self._action_scheduler.active_action.target_y if self._action_scheduler.active_action else self._input_backend._last_y
-                        if candidate_collector is not None and self._action_scheduler.active_action is not None:
-                            candidate_collector.collect_click(
-                                frame,
-                                screen_x=self._action_scheduler.active_action.target_x,
-                                screen_y=self._action_scheduler.active_action.target_y,
-                                region_left=region.left,
-                                region_top=region.top,
-                                frame_id=self._frame_count,
-                            )
                         self._action_scheduler.clear()
 
                     if self._action_scheduler.is_idle and self._input_enabled and actions:
@@ -815,15 +851,6 @@ class Application:
                         px, py = action.position
                         screen_x, screen_y = frame_to_screen(px, py, region.left, region.top)
                         ts = self._input_backend.click_screen(screen_x, screen_y)
-                        if candidate_collector is not None:
-                            candidate_collector.collect_click(
-                                frame,
-                                screen_x=screen_x,
-                                screen_y=screen_y,
-                                region_left=region.left,
-                                region_top=region.top,
-                                frame_id=self._frame_count,
-                            )
                         clicks_this_frame += 1
                         self._total_clicks += 1
 
@@ -1180,9 +1207,10 @@ def parse_args(argv=None):
         help="Disable JSONL downstream diagnostics for lower-overhead live runs",
     )
     parser.add_argument(
-        "--record-candidates",
+        "--record-clicks", "--record-candidates",
+        dest="record_candidates",
         action="store_true",
-        help="LIVE balloon mode: passively save detector candidate crops while the bot plays",
+        help="LIVE balloon mode: save every physical left-click location as a 96x96 crop (no dedup; --record-candidates is an alias)",
     )
     return parser.parse_args(argv)
 
