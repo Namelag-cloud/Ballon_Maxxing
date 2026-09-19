@@ -464,7 +464,7 @@ class BalloonGameProfile(GameProfile):
                 or (
                     touches_edge
                     and 0.45 <= aspect_ratio <= 1.45
-                    and circularity >= 0.55
+                    and circularity >= 0.45
                 )
             )
             if not (
@@ -819,7 +819,6 @@ class BalloonGameProfile(GameProfile):
             if d.target_type == TargetType.NORMAL_BALLOON
             and d.color in (BalloonColor.YELLOW, BalloonColor.GREEN)
             and max(d.width, d.height) <= self._GOLDEN_DUO_MAX_DIAMETER_PX
-            and d.visual_features.white_border_ratio >= self._TWIN_WHITE_BORDER_RATIO
         ]
 
         pairs: list[tuple[TargetDetection, TargetDetection]] = []
