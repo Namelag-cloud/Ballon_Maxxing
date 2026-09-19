@@ -83,10 +83,9 @@ def load_classes(train_manifest: Path) -> list[str]:
 
 
 def class_weights(dataset: ManifestDataset, classes: list[str]) -> torch.Tensor:
-    counts = np.bincount(
-        [item["label"] for item in dataset.items],
-        minlength=len(classes),
-    ).astype(np.float64)
+    class_to_index = {name: i for i, name in enumerate(classes)}
+    indices = [class_to_index[item["label"]] for item in dataset.items]
+    counts = np.bincount(indices, minlength=len(classes)).astype(np.float64)
     total = counts.sum()
     weights = total / (len(classes) * np.maximum(counts, 1))
     return torch.tensor(weights, dtype=torch.float32)
