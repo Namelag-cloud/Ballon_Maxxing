@@ -492,14 +492,35 @@ class BalloonExecutor:
             if target_id is not None and not self._target_id_observed(
                 target_id, actions, notifications, multicolor_specials
             ):
-                self._primary_scheduler.cancel()
-                if self._diagnostic:
+                # Tracker IDs can churn between frames even when the same
+                # physical G precursor is still visible. Preserve stale-target
+                # protection, but allow a precursor to follow a nearby
+                # same-color replacement candidate.
+                precursor_replacement = (
+                    isinstance(self._active_primary, BalloonAction)
+                    and self._active_primary.metadata.get("g_precursor", False)
+                    and self._special_precursor_replacement_observed(
+                        self._active_primary,
+                        actions,
+                    )
+                )
+                if not precursor_replacement:
+                    self._primary_scheduler.cancel()
+                    if self._diagnostic:
+                        self._diagnostic.log(
+                            "stale_action_cancel",
+                            lane="primary",
+                            target_id=target_id,
+                            phase=active.phase.name,
+                            reason="target_absent_from_latest_decision_observation",
+                        )
+                elif self._diagnostic:
                     self._diagnostic.log(
-                        "stale_action_cancel",
+                        "stale_action_rebind",
                         lane="primary",
                         target_id=target_id,
                         phase=active.phase.name,
-                        reason="target_absent_from_latest_decision_observation",
+                        reason="g_precursor_same_color_nearby_replacement",
                     )
 
         active_twin = self._twin_scheduler.active_actions
@@ -519,6 +540,30 @@ class BalloonExecutor:
                         target_ids=sorted(target_ids),
                         reason="target_absent_from_latest_decision_observation",
                     )
+
+    @staticmethod
+    def _special_precursor_replacement_observed(active: BalloonAction, actions) -> bool:
+        if active.target_type.value != "special_sequence_balloon" or active.color is None:
+            return False
+        ax, ay = active.position
+        # Precursor rings are relatively large; 48 px is deliberately wider
+        # than normal frame-to-frame tracker jitter but small enough to avoid
+        # rebinding to a different nearby target.
+        max_distance_sq = 48 * 48
+        for candidate in actions:
+            if not isinstance(candidate, BalloonAction):
+                continue
+            if candidate.target_type.value != "special_sequence_balloon":
+                continue
+            if candidate.color != active.color:
+                continue
+            if candidate.target_id == active.target_id:
+                return True
+            dx = candidate.position[0] - ax
+            dy = candidate.position[1] - ay
+            if dx * dx + dy * dy <= max_distance_sq:
+                return True
+        return False
 
     @classmethod
     def _observed_target_ids(cls, actions, notifications, multicolor_specials) -> set[int]:
