@@ -24,6 +24,11 @@ class BalloonTrack:
     frames_missing: int = 0
     tracking_class: str | None = None
     metadata: dict = field(default_factory=dict)
+    age_frames: int = 1
+    total_displacement_px: float = 0.0
+    mean_displacement_px: float = 0.0
+    stationary_frames: int = 0
+    max_bbox_delta_px: float = 0.0
 
 
 class Tracker:
@@ -106,11 +111,35 @@ class Tracker:
             first_seen=now,
             last_seen=now,
             tracking_class=det.tracking_class,
-            metadata=dict(det.metadata),
+            metadata={
+                **dict(det.metadata),
+                "temporal": {
+                    "age_frames": 1,
+                    "total_displacement_px": 0.0,
+                    "mean_displacement_px": 0.0,
+                    "stationary_frames": 0,
+                    "max_bbox_delta_px": 0.0,
+                    "static_ui_suspect": False,
+                },
+            },
+            age_frames=1,
         )
 
     def _update_track(self, track_id: int, det: Detection, now: float) -> None:
         track = self._tracks[track_id]
+        previous_position = track.position
+        previous_bbox = track.bbox
+        displacement = float(np.hypot(
+            det.center[0] - previous_position[0],
+            det.center[1] - previous_position[1],
+        ))
+        bbox_delta = max(
+            abs(det.bbox[0] - previous_bbox[0]),
+            abs(det.bbox[1] - previous_bbox[1]),
+            abs(det.bbox[2] - previous_bbox[2]),
+            abs(det.bbox[3] - previous_bbox[3]),
+        )
+
         track.position = det.center
         track.bbox = det.bbox
         track.color = det.color_name
@@ -119,4 +148,26 @@ class Tracker:
         track.last_seen = now
         track.frames_missing = 0
         track.tracking_class = det.tracking_class
-        track.metadata = dict(det.metadata)
+        track.age_frames += 1
+        track.total_displacement_px += displacement
+        track.mean_displacement_px = track.total_displacement_px / max(1, track.age_frames - 1)
+        track.stationary_frames = track.stationary_frames + 1 if displacement < 1.0 else 0
+        track.max_bbox_delta_px = max(track.max_bbox_delta_px, float(bbox_delta))
+
+        static_ui_suspect = (
+            track.age_frames >= 12
+            and track.stationary_frames >= 10
+            and track.mean_displacement_px < 0.75
+            and track.max_bbox_delta_px <= 2.0
+        )
+        track.metadata = {
+            **dict(det.metadata),
+            "temporal": {
+                "age_frames": track.age_frames,
+                "total_displacement_px": track.total_displacement_px,
+                "mean_displacement_px": track.mean_displacement_px,
+                "stationary_frames": track.stationary_frames,
+                "max_bbox_delta_px": track.max_bbox_delta_px,
+                "static_ui_suspect": static_ui_suspect,
+            },
+        }
