@@ -268,7 +268,22 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         self.assertFalse(disappeared.g_click_completed)
 
     def test_g_precursor_survives_tracker_id_churn_when_same_color_is_nearby(self):
+        self.engine.decide([
+            balloon_action(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (100, 100), 1),
+            balloon_action(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (500, 500), 2),
+            balloon_action(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.YELLOW, (800, 100), 3),
+            balloon_action(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (1200, 700), 4),
+        ])
         active = self.engine.decide([
+            balloon_action(
+                TargetType.SPECIAL_SEQUENCE_BALLOON,
+                BalloonColor.BLUE,
+                (100, 100),
+                10,
+            )
+        ]).actions[0]
+        self.assertTrue(self.engine.complete_action(active))
+        red = self.engine.decide([
             balloon_action(
                 TargetType.SPECIAL_SEQUENCE_BALLOON,
                 BalloonColor.RED,
@@ -284,10 +299,10 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
                 202,
             )
         ]).actions[0]
-        self.assertTrue(active.metadata.get("g_precursor"))
+        self.assertTrue(red.metadata.get("g_precursor"))
         self.assertTrue(
             self.executor._special_precursor_replacement_observed(
-                active,
+                red,
                 [replacement],
             )
         )
