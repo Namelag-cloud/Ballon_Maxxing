@@ -112,7 +112,7 @@ class TestDecisionConsole(unittest.TestCase):
         self.assertIn("TWIN: CLICK", text)
         self.assertIn("twin_balloon#20", text)
         self.assertIn("twin_balloon#21", text)
-        self.assertIn("SUPER-G: required=red", text)
+        self.assertIn("G-PRECURSOR: required=red", text)
 
     def test_verbose_decisions_cli_flag(self):
         args = parse_args(["--verbose-decisions"])
