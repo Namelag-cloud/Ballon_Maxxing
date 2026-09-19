@@ -159,7 +159,8 @@ class TestBalloonVision(unittest.TestCase):
         cv2.circle(frame, (120, 760), 25, (230, 230, 230), -1)
         cv2.circle(frame, (200, 760), 25, (230, 230, 230), -1)
 
-        detections = BalloonGameProfile().detect(frame)
+        profile = BalloonGameProfile()
+        detections = profile.detect(frame)
         specials = [
             d for d in detections
             if d["target_type"] == TargetType.MULTICOLOR_SPECIAL.value
