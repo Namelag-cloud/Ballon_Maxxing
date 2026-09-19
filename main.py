@@ -37,6 +37,7 @@ from behavior.action_scheduler import ActionScheduler
 from behavior.balloon_executor import BalloonExecutor
 from diagnostics.downstream import DownstreamDiagnostic
 from diagnostics.decision_console import DecisionConsole
+from training.candidate_collector import CandidateCollector
 
 
 def _balloon_action_to_click_actions(action: BalloonAction | TwinAction) -> list[ClickAction]:
@@ -449,6 +450,77 @@ class Application:
                 self._action_scheduler.cancel()
 
         self._print_benchmark_results(durations, frame_times)
+
+    def _run_collect(self) -> None:
+        if self._game_profile is None or self._game_profile.game_type != GameType.BALLOON_GAME:
+            raise ValueError("Collection mode currently requires --game balloons")
+
+        collector = CandidateCollector()
+        print("Running COLLECTION mode - screen capture only, NO mouse clicks")
+        print(f"Game profile: {self._game_profile.name}")
+        print(f"Saving crops to: {collector.session_dir}")
+        print("Play normally. Click whatever balloons you can.")
+        print("ESC = stop collection")
+        if self._startup_delay > 0:
+            print(f"\nStarting in {self._startup_delay:.1f}s — switch to your game window now...")
+            delay_end = now_monotonic() + self._startup_delay
+            last_printed = -1
+            while self._running and now_monotonic() < delay_end:
+                remaining = delay_end - now_monotonic()
+                secs = int(remaining) + 1
+                if secs != last_printed and secs > 0:
+                    print(f"  {secs}s remaining...")
+                    last_printed = secs
+                time.sleep(0.05)
+            if not self._running:
+                collector.close()
+                return
+            self._start_time = now_monotonic()
+        else:
+            self._start_time = now_monotonic()
+
+        try:
+            while self._running:
+                if self._duration and (now_monotonic() - self._start_time) >= self._duration:
+                    print(f"\nDuration limit reached ({self._duration}s)")
+                    break
+
+                t_start = now_monotonic()
+                frame, capture_ts = self._capture.grab()
+                detections = self._game_profile.detect(frame)
+                self._frame_count += 1
+
+                saved = collector.collect_frame(
+                    frame,
+                    detections,
+                    frame_id=self._frame_count,
+                    capture_timestamp=capture_ts,
+                )
+
+                self._fps_frame_count += 1
+                elapsed = now_monotonic() - self._fps_counter_start
+                if elapsed >= 1.0:
+                    self._current_fps = self._fps_frame_count / elapsed
+                    self._fps_frame_count = 0
+                    self._fps_counter_start = now_monotonic()
+
+                if self._frame_count % 60 == 0:
+                    proc_ms = (now_monotonic() - t_start) * 1000.0
+                    print(
+                        f"Frame {self._frame_count:6d} | "
+                        f"FPS: {self._current_fps:5.1f} | "
+                        f"Proc: {proc_ms:6.2f}ms | "
+                        f"Candidates: {len(detections):3d} | "
+                        f"Saved: {collector.saved_count:4d}"
+                    )
+                    sys.stdout.flush()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            collector.close()
+
+        print(f"\nCollection complete. {collector.saved_count} candidate crops saved.")
+        print(f"Session directory: {collector.session_dir}")
 
     def _run_dry_run(self) -> None:
         print("Running DRY-RUN mode - detecting targets, no mouse clicks")
@@ -981,6 +1053,8 @@ class Application:
             self._run_dry_run()
         elif self._mode == RunMode.LIVE:
             self._run_live()
+        elif self._mode == RunMode.COLLECT:
+            self._run_collect()
 
         self._capture.close()
         self._visualizer.close()
@@ -994,7 +1068,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Balloon Game Automation")
     parser.add_argument(
         "--mode",
-        choices=["benchmark", "dry-run", "live"],
+        choices=["benchmark", "dry-run", "live", "collect"],
         default=None,
         help="Run mode (overrides config file)",
     )
@@ -1037,7 +1111,7 @@ def parse_args(argv=None):
         "--startup-delay",
         type=float,
         default=3.0,
-        help="Seconds to wait before sending input in LIVE mode (default: 3.0, 0 to disable)",
+        help="Seconds to wait before starting collection/input (default: 3.0, 0 to disable)",
     )
     parser.add_argument(
         "--fast",
@@ -1100,7 +1174,7 @@ def main():
     print(f"Region: {settings.capture.region.left},{settings.capture.region.top} "
           f"{settings.capture.region.width}x{settings.capture.region.height}")
     print(f"Input enabled: {settings.input.enabled}")
-    if settings.mode == RunMode.LIVE and args.startup_delay > 0:
+    if settings.mode in (RunMode.LIVE, RunMode.COLLECT) and args.startup_delay > 0:
         print(f"Startup delay: {args.startup_delay}s")
     if args.verbose_decisions:
         print("Verbose decisions: enabled")
