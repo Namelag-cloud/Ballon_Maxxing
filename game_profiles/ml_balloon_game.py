@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +35,7 @@ class MLBalloonGameProfile(BalloonGameProfile):
         )
 
     def detect(self, bgr_frame: np.ndarray) -> list[dict]:
-        total_t0 = __import__("time").perf_counter()
+        total_t0 = time.perf_counter()
         candidates = self.detect_spatial_candidates(bgr_frame)
 
         # Gemini has no trained ML class yet. Keep this narrow mechanics-only
