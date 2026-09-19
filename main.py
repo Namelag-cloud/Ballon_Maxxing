@@ -122,6 +122,7 @@ class Application:
         duration: Optional[float] = None,
         startup_delay: float = 3.0,
         fast_execution: bool = False,
+        diagnostics_enabled: bool = True,
     ) -> None:
         self._settings = settings
         self._running = True
@@ -137,7 +138,13 @@ class Application:
         self._vision = VisionPipeline(settings)
         self._tracker = Tracker(settings)
         self._selector = TargetSelector(settings)
-        self._diagnostic = DownstreamDiagnostic() if game_profile and game_profile.game_type == GameType.BALLOON_GAME else None
+        self._diagnostic = (
+            DownstreamDiagnostic()
+            if diagnostics_enabled
+            and game_profile
+            and game_profile.game_type == GameType.BALLOON_GAME
+            else None
+        )
         self._input_backend = SendInputBackend(diagnostic=self._diagnostic) if settings.input.enabled else None
         self._telemetry = TelemetryLogger()
         self._feedback_reader = FeedbackReader(
@@ -214,7 +221,7 @@ class Application:
 
         user32.UnhookWindowsHookEx(hook)
 
-    def _process_frame(self, frame: np.ndarray):
+    def _process_frame(self, frame: np.ndarray, capture_ts: float | None = None):
         t0 = now_monotonic()
         self._last_feedback = self._feedback_reader.observe(frame, t0)
         feedback_ms = (now_monotonic() - t0) * 1000.0
@@ -246,6 +253,14 @@ class Application:
 
                 t0 = now_monotonic()
                 decision = self._balloon_decision.decide(current_detections)
+                decision_ready_ts = now_monotonic()
+                if self._diagnostic and capture_ts is not None:
+                    self._log_click_followups(
+                        current_detections,
+                        frame_id=self._frame_count + 1,
+                        capture_ts=capture_ts,
+                        decision_ready_ts=decision_ready_ts,
+                    )
                 decision_ms = (now_monotonic() - t0) * 1000.0
                 self._balloon_frame_decision = decision
                 self._last_frame_stage_timings = {
@@ -255,7 +270,31 @@ class Application:
                     "decision_ms": decision_ms,
                 }
                 if self._diagnostic:
-                    self._diagnostic.log("tracking_decision", frame_id=self._frame_count + 1, detections=[{"type": d.get("target_type"), "id": d.get("target_id"), "color": d.get("color_name"), "center": d.get("center")} for d in current_detections], detection_counts=self._count_types(current_detections), actionable=[self._action_info_for_diag(a) for a in decision.actions], actionable_counts=self._count_types_from_actions(decision.actions), g_action=self._action_info_for_diag(decision.g_action), multicolor_specials=[self._action_info_for_diag(a) for a in decision.multicolor_specials], notifications=[self._action_info_for_diag(a) for a in decision.notifications], mode=decision.mode.value, special_step=decision.special_step.value, required_special_color=(self._balloon_decision.state.required_special_color.value if self._balloon_decision.state.required_special_color else None), special_sequence_seen=self._balloon_decision.state.special_sequence_seen)
+                    self._diagnostic.log(
+                        "tracking_decision",
+                        frame_id=self._frame_count + 1,
+                        detections=[{
+                            "type": d.get("target_type"),
+                            "id": d.get("target_id"),
+                            "color": d.get("color_name"),
+                            "center": d.get("center"),
+                            "temporal": d.get("metadata", {}).get("temporal", {}),
+                        } for d in current_detections],
+                        detection_counts=self._count_types(current_detections),
+                        actionable=[self._action_info_for_diag(a) for a in decision.actions],
+                        actionable_counts=self._count_types_from_actions(decision.actions),
+                        g_action=self._action_info_for_diag(decision.g_action),
+                        multicolor_specials=[self._action_info_for_diag(a) for a in decision.multicolor_specials],
+                        notifications=[self._action_info_for_diag(a) for a in decision.notifications],
+                        mode=decision.mode.value,
+                        special_step=decision.special_step.value,
+                        required_special_color=(self._balloon_decision.state.required_special_color.value if self._balloon_decision.state.required_special_color else None),
+                        special_sequence_seen=self._balloon_decision.state.special_sequence_seen,
+                        static_ui_suspect_count=sum(
+                            1 for d in current_detections
+                            if d.get("metadata", {}).get("temporal", {}).get("static_ui_suspect", False)
+                        ),
+                    )
 
                 click_actions: list[ClickAction] = []
                 game_actions: list[GameAction] = []
@@ -362,7 +401,7 @@ class Application:
                 frame, capture_ts = self._capture.grab()
                 t_after_capture = now_monotonic()
 
-                detections, tracks, actions, game_actions = self._process_frame(frame)
+                detections, tracks, actions, game_actions = self._process_frame(frame, capture_ts)
                 t_after_decision = now_monotonic()
 
                 self._frame_count += 1
@@ -423,7 +462,7 @@ class Application:
                 t_start = now_monotonic()
 
                 frame, capture_ts = self._capture.grab()
-                detections, tracks, actions, game_actions = self._process_frame(frame)
+                detections, tracks, actions, game_actions = self._process_frame(frame, capture_ts)
 
                 self._frame_count += 1
                 self._fps_frame_count += 1
@@ -536,7 +575,7 @@ class Application:
                     self._diagnostic.begin_frame()
 
                 frame, capture_ts = self._capture.grab()
-                detections, tracks, actions, game_actions = self._process_frame(frame)
+                detections, tracks, actions, game_actions = self._process_frame(frame, capture_ts)
                 decision_ready_ts = now_monotonic()
 
                 self._frame_count += 1
@@ -694,15 +733,19 @@ class Application:
                 self._telemetry.log_frame(telem)
                 telemetry_ms = (now_monotonic() - telemetry_t0) * 1000.0
 
-                gui_t0 = now_monotonic()
-                vis = self._visualizer.render(
-                    frame, detections, tracks, actions,
-                    input_enabled=self._input_enabled, fps=self._current_fps,
-                )
-                gui_render_ms = (now_monotonic() - gui_t0) * 1000.0
-                gui_show_t0 = now_monotonic()
-                key = self._visualizer.show(vis)
-                gui_show_ms = (now_monotonic() - gui_show_t0) * 1000.0
+                gui_render_ms = 0.0
+                gui_show_ms = 0.0
+                key = -1
+                if self._settings.debug.show_detections:
+                    gui_t0 = now_monotonic()
+                    vis = self._visualizer.render(
+                        frame, detections, tracks, actions,
+                        input_enabled=self._input_enabled, fps=self._current_fps,
+                    )
+                    gui_render_ms = (now_monotonic() - gui_t0) * 1000.0
+                    gui_show_t0 = now_monotonic()
+                    key = self._visualizer.show(vis)
+                    gui_show_ms = (now_monotonic() - gui_show_t0) * 1000.0
 
                 if self._diagnostic:
                     self._diagnostic.log(
@@ -968,6 +1011,11 @@ def parse_args(argv=None):
         action="store_true",
         help="Balloon mode: bypass behavioral reaction/movement/click delays and dispatch input immediately",
     )
+    parser.add_argument(
+        "--no-diagnostics",
+        action="store_true",
+        help="Disable JSONL downstream diagnostics for lower-overhead live runs",
+    )
     return parser.parse_args(argv)
 
 
@@ -1024,6 +1072,7 @@ def main():
         duration=args.duration,
         startup_delay=args.startup_delay,
         fast_execution=args.fast,
+        diagnostics_enabled=not args.no_diagnostics,
     )
     app.run()
 
