@@ -42,6 +42,9 @@ class BalloonGameProfile(GameProfile):
     _CORE_FILL_MAX = 0.90
     _CORE_MIN_CIRCULARITY = 0.45
     _MAX_ENCLOSED_HOLE_RATIO = 0.20
+    # A true balloon has a fairly uniform radial boundary. This catches
+    # rounded/irregular UI shapes that can otherwise pass bbox circularity.
+    _MAX_BOUNDARY_RADIAL_CV = 0.10
     _WHITE_CORE_RATIO = 0.50
     _WHITE_MIN_DIAMETER_RATIO = 0.05
     _TWIN_WHITE_BORDER_RATIO = 0.10
@@ -430,6 +433,10 @@ class BalloonGameProfile(GameProfile):
             hull_area = cv2.contourArea(cv2.convexHull(contour))
             solidity = contour_area / hull_area if hull_area > 0 else 0.0
 
+            boundary_radial_cv = self._boundary_radial_cv(contour)
+            if boundary_radial_cv > self._MAX_BOUNDARY_RADIAL_CV:
+                continue
+
             enclosed_hole_area = 0.0
             if hierarchy is not None:
                 for contour_index, contour_info in enumerate(hierarchy[0]):
@@ -503,6 +510,7 @@ class BalloonGameProfile(GameProfile):
                     "fill_ratio": float(fill_ratio),
                     "circularity": float(circularity),
                     "solidity": float(solidity),
+                    "boundary_radial_cv": float(boundary_radial_cv),
                     "hole_ratio": float(hole_ratio),
                 })
 
@@ -970,6 +978,23 @@ class BalloonGameProfile(GameProfile):
             white_border_ratio=float(outline.white_ratio),
             outline_contrast=float(outline.contrast),
         )
+
+    @staticmethod
+    def _boundary_radial_cv(contour: np.ndarray) -> float:
+        """Return radial-boundary coefficient of variation around the contour centroid."""
+        if contour is None or len(contour) < 8:
+            return float("inf")
+        moments = cv2.moments(contour)
+        if moments["m00"] <= 0.0:
+            return float("inf")
+        cx = moments["m10"] / moments["m00"]
+        cy = moments["m01"] / moments["m00"]
+        points = contour.reshape(-1, 2).astype(np.float32)
+        radii = np.hypot(points[:, 0] - cx, points[:, 1] - cy)
+        mean_radius = float(np.mean(radii))
+        if mean_radius <= 0.0:
+            return float("inf")
+        return float(np.std(radii) / mean_radius)
 
     @staticmethod
     def _white_core_ratio(
