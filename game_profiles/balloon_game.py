@@ -418,6 +418,50 @@ class BalloonGameProfile(GameProfile):
                 ((x, y, w, h), area, (x + w / 2.0, y + h / 2.0))
             )
 
+            # Cheap shape gates from connected-component statistics run before
+            # any contour/mask allocation. OpenCV already gives us bbox + area
+            # from connectedComponentsWithStats, so reject obviously non-balloon
+            # components without paying for contour analysis. These gates apply
+            # equally to small and large balloons.
+            fill_ratio = float(area) / float(w * h)
+            aspect_ratio = float(w) / float(h)
+            min_side = float(min(w, h))
+            equivalent_diameter = float(2.0 * np.sqrt(area / np.pi))
+            bbox_circle_fill = (
+                float(area) / (np.pi * (min_side / 2.0) ** 2)
+                if min_side > 0.0
+                else 0.0
+            )
+            touches_edge = (
+                x == 0
+                or y == 0
+                or x + w >= hsv.shape[1]
+                or y + h >= hsv.shape[0]
+            )
+            aspect_ok = (
+                self._CORE_MIN_ASPECT_RATIO <= aspect_ratio <= self._CORE_MAX_ASPECT_RATIO
+                or (
+                    touches_edge
+                    and 0.45 <= aspect_ratio <= 2.0
+                    and fill_ratio <= 0.80
+                )
+            )
+            if self._is_score_counter_candidate(
+                x=x,
+                y=y,
+                width=w,
+                height=h,
+                aspect_ratio=aspect_ratio,
+            ):
+                self._last_profile["score_ui_rejections"] += 1
+                continue
+            if not (
+                self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
+                and aspect_ok
+                and 0.70 <= bbox_circle_fill <= 1.35
+            ):
+                continue
+
             mask_alloc_t0 = time.perf_counter()
             component_mask = np.zeros((h, w), dtype=np.uint8)
             mask_alloc_ms = (time.perf_counter() - mask_alloc_t0) * 1000.0
@@ -481,38 +525,7 @@ class BalloonGameProfile(GameProfile):
                 )
                 continue
 
-            fill_ratio = float(area) / float(w * h)
-            aspect_ratio = float(w) / float(h)
-            touches_edge = (
-                x == 0
-                or y == 0
-                or x + w >= hsv.shape[1]
-                or y + h >= hsv.shape[0]
-            )
-            aspect_ok = (
-                self._CORE_MIN_ASPECT_RATIO <= aspect_ratio <= self._CORE_MAX_ASPECT_RATIO
-                or (
-                    touches_edge
-                    and 0.45 <= aspect_ratio <= 2.0
-                    and circularity >= 0.55
-                    and fill_ratio <= 0.80
-                )
-            )
-            if self._is_score_counter_candidate(
-                x=x,
-                y=y,
-                width=w,
-                height=h,
-                aspect_ratio=aspect_ratio,
-            ):
-                self._last_profile["score_ui_rejections"] += 1
-                continue
-
-            if not (
-                self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
-                and circularity >= self._CORE_MIN_CIRCULARITY
-                and aspect_ok
-            ):
+            if circularity < self._CORE_MIN_CIRCULARITY:
                 continue
 
             # Keep a small geometry sample for diagnosing false positives. This
@@ -531,8 +544,8 @@ class BalloonGameProfile(GameProfile):
                     "solidity": float(solidity),
                     "boundary_radial_cv": float(boundary_radial_cv),
                     "hole_ratio": float(hole_ratio),
-                    "equivalent_diameter": float(2.0 * np.sqrt(area / np.pi)),
-                    "circle_bbox_fill": float(area / (np.pi * (min(w, h) / 2.0) ** 2)),
+                    "equivalent_diameter": equivalent_diameter,
+                    "circle_bbox_fill": bbox_circle_fill,
                 })
 
             classification_t0 = time.perf_counter()
