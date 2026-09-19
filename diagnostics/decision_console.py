@@ -48,6 +48,8 @@ class DecisionConsole:
         g_action = getattr(decision, "g_action", None)
         if g_action is not None:
             self._print_action(frame_id, g_action)
+            if getattr(g_action, "metadata", {}).get("super_g_active", False):
+                print(f"[DECISION {frame_id}] SUPER-G: active")
 
         multicolor = list(getattr(decision, "multicolor_specials", ()))
         executable_multicolor = {
@@ -67,7 +69,7 @@ class DecisionConsole:
         step = getattr(getattr(decision, "special_step", None), "value", None)
         if mode == "special_sequence":
             print(
-                f"[DECISION {frame_id}] SUPER-G: required={step or 'unknown'}"
+                f"[DECISION {frame_id}] G-PRECURSOR: required={step or 'unknown'}"
             )
 
     def execution(self, frame_id: int, execution: Any) -> None:
