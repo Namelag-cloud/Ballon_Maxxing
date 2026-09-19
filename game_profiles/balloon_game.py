@@ -1281,6 +1281,30 @@ class BalloonGameProfile(GameProfile):
         )
 
     @staticmethod
+    def _bbox_iou(
+        first: tuple[int, int, int, int],
+        second: tuple[int, int, int, int],
+    ) -> float:
+        """Return intersection-over-union for two x/y/width/height boxes."""
+        x1, y1, w1, h1 = first
+        x2, y2, w2, h2 = second
+        if w1 <= 0 or h1 <= 0 or w2 <= 0 or h2 <= 0:
+            return 0.0
+
+        left = max(x1, x2)
+        top = max(y1, y2)
+        right = min(x1 + w1, x2 + w2)
+        bottom = min(y1 + h1, y2 + h2)
+        intersection_width = max(0, right - left)
+        intersection_height = max(0, bottom - top)
+        intersection = intersection_width * intersection_height
+        if intersection == 0:
+            return 0.0
+
+        union = (w1 * h1) + (w2 * h2) - intersection
+        return float(intersection) / float(union) if union > 0 else 0.0
+
+    @staticmethod
     def _white_core_ratio(
         hsv: np.ndarray,
         bbox: tuple[int, int, int, int],
