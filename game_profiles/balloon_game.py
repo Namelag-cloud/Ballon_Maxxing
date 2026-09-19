@@ -138,6 +138,8 @@ class BalloonGameProfile(GameProfile):
             "candidate_counts": {"blue": 0, "red": 0, "yellow": 0, "green": 0},
             "candidate_geometry": [],
             "ring_circles_returned": 0,
+            "notification_ms": 0.0,
+            "notification_count": 0,
             "semantic": {
                 "super_g_confirmed": False,
                 "super_g_member_ids": [],
@@ -177,10 +179,16 @@ class BalloonGameProfile(GameProfile):
                 self._detect_color_components(hsv, color_name)
             )
 
+        notification_t0 = time.perf_counter()
+        notifications = self._detect_notifications(hsv)
+        candidates.extend(notifications)
+        notification_count = len(notifications)
+        self._last_profile["notification_ms"] = (
+            time.perf_counter() - notification_t0
+        ) * 1000.0
+        self._last_profile["notification_count"] = notification_count
+
         multicolor_t0 = time.perf_counter()
-        notification_count = sum(
-            1 for d in candidates if d.target_type == TargetType.INVALID_WHITE
-        )
         candidates.extend(
             self._detect_multicolor_special(
                 hsv,
@@ -190,8 +198,18 @@ class BalloonGameProfile(GameProfile):
         self._last_profile["multicolor_ms"] = (time.perf_counter() - multicolor_t0) * 1000.0
 
         g_t0 = time.perf_counter()
-        candidates.extend(self._g_detector.detect(hsv))
+        g_detections = self._g_detector.detect(hsv)
         self._last_profile["g_detector_ms"] = (time.perf_counter() - g_t0) * 1000.0
+
+        # G is a more specific multicolor geometry class. Do not let the generic
+        # Gemini candidate shadow the same image region when both detectors fire.
+        g_boxes = [d.bbox for d in g_detections]
+        candidates = [
+            d for d in candidates
+            if d.target_type != TargetType.MULTICOLOR_SPECIAL
+            or not any(self._bbox_iou(d.bbox, box) > 0.40 for box in g_boxes)
+        ]
+        candidates.extend(g_detections)
 
         classification_t0 = time.perf_counter()
         normal_candidates = [
@@ -302,7 +320,10 @@ class BalloonGameProfile(GameProfile):
         now = time.perf_counter_ns() / 1e9
         actions: list[GameAction] = []
         for det in detections:
-            if det.get("target_type") == TargetType.INVALID_WHITE.value:
+            if det.get("target_type") in {
+                TargetType.INVALID_WHITE.value,
+                TargetType.NOTIFICATION.value,
+            }:
                 continue
             color = det.get("color_name") or "unknown"
             actions.append(
@@ -507,6 +528,73 @@ class BalloonGameProfile(GameProfile):
         self._last_profile["candidate_counts"][color_name] = len(detections)
         return detections
 
+    def _detect_notifications(self, hsv: np.ndarray) -> list[TargetDetection]:
+        """Detect source-defined white notification balloons.
+
+        Notifications are pure white game objects, so they are not represented
+        by the four saturated color masks used for normal balloons. Keeping them
+        as a separate, non-actionable detection also gives Gemini its observable
+        spawn precondition without permitting notification clicks.
+        """
+        if "white" not in self._settings.colors:
+            return []
+
+        mask = self._classifier.make_color_mask(hsv, "white")
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._kernel, iterations=1)
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        detections: list[TargetDetection] = []
+
+        for label in range(1, count):
+            x, y, w, h, area = [int(v) for v in stats[label]]
+            if area < self._settings.detection.min_area or area > self._settings.detection.max_area:
+                continue
+            if w <= 0 or h <= 0:
+                continue
+
+            fill_ratio = float(area) / float(w * h)
+            aspect = float(w) / float(h)
+            if not (0.45 <= fill_ratio <= 0.95 and 0.65 <= aspect <= 1.35):
+                continue
+
+            component_mask = np.zeros((h, w), dtype=np.uint8)
+            component_mask[labels[y:y + h, x:x + w] == label] = 255
+            contours, _ = cv2.findContours(
+                component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            if not contours:
+                continue
+            contour = max(contours, key=cv2.contourArea)
+            perimeter = cv2.arcLength(contour, True)
+            contour_area = cv2.contourArea(contour)
+            circularity = (
+                4.0 * np.pi * contour_area / (perimeter * perimeter)
+                if perimeter > 0 else 0.0
+            )
+            if circularity < 0.45:
+                continue
+
+            detections.append(
+                TargetDetection(
+                    target_type=TargetType.NOTIFICATION,
+                    color=None,
+                    center=(x + w // 2, y + h // 2),
+                    bbox=(x, y, w, h),
+                    area=area,
+                    confidence=1.0,
+                    width=float(w),
+                    height=float(h),
+                    visual_features=VisualFeatures(
+                        circularity=float(circularity),
+                        solidity=1.0,
+                    ),
+                    metadata={
+                        "semantic_class": "notification",
+                        "semantic_confirmed": True,
+                    },
+                )
+            )
+        return detections
+
     def _detect_multicolor_special(
         self,
         hsv: np.ndarray,
@@ -539,10 +627,10 @@ class BalloonGameProfile(GameProfile):
                 continue
 
             fill_ratio = float(area) / float(w * h)
-            if not (0.30 <= fill_ratio <= 0.65):
+            if fill_ratio < 0.25:
                 continue
             aspect = float(w) / float(h)
-            if not (0.70 <= aspect <= 1.30):
+            if not (0.55 <= aspect <= 1.45):
                 continue
 
             diameter = max(w, h)
