@@ -177,6 +177,9 @@ class Application:
         self._fps_frame_count = 0
         self._current_fps = 0.0
         self._last_frame_stage_timings = {}
+        # One-frame follow-up context for classifying post-click behavior.
+        # These are observations only; they never infer authoritative hit state.
+        self._pending_click_observations: dict[int, dict] = {}
 
     def _setup_hotkeys(self) -> None:
         HK_RSHIFT = 0xA1
@@ -252,7 +255,7 @@ class Application:
                     "decision_ms": decision_ms,
                 }
                 if self._diagnostic:
-                    self._diagnostic.log("tracking_decision", frame_id=self._frame_count + 1, detections=[{"type": d.get("target_type"), "id": d.get("target_id"), "color": d.get("color_name"), "center": d.get("center")} for d in current_detections], detection_counts=self._count_types(current_detections), actionable=[self._action_info_for_diag(a) for a in decision.actions], actionable_counts=self._count_types_from_actions(decision.actions), g_action=self._action_info_for_diag(decision.g_action), multicolor_specials=[self._action_info_for_diag(a) for a in decision.multicolor_specials], notifications=[self._action_info_for_diag(a) for a in decision.notifications], mode=decision.mode.value, special_step=decision.special_step.value)
+                    self._diagnostic.log("tracking_decision", frame_id=self._frame_count + 1, detections=[{"type": d.get("target_type"), "id": d.get("target_id"), "color": d.get("color_name"), "center": d.get("center")} for d in current_detections], detection_counts=self._count_types(current_detections), actionable=[self._action_info_for_diag(a) for a in decision.actions], actionable_counts=self._count_types_from_actions(decision.actions), g_action=self._action_info_for_diag(decision.g_action), multicolor_specials=[self._action_info_for_diag(a) for a in decision.multicolor_specials], notifications=[self._action_info_for_diag(a) for a in decision.notifications], mode=decision.mode.value, special_step=decision.special_step.value, required_special_color=(self._balloon_decision.state.required_special_color.value if self._balloon_decision.state.required_special_color else None), special_sequence_seen=self._balloon_decision.state.special_sequence_seen)
 
                 click_actions: list[ClickAction] = []
                 game_actions: list[GameAction] = []
@@ -534,6 +537,7 @@ class Application:
 
                 frame, capture_ts = self._capture.grab()
                 detections, tracks, actions, game_actions = self._process_frame(frame)
+                decision_ready_ts = now_monotonic()
 
                 self._frame_count += 1
                 self._fps_frame_count += 1
@@ -571,15 +575,38 @@ class Application:
                     executor_ms = (now_monotonic() - executor_t0) * 1000.0
                     if self._diagnostic:
                         self._diagnostic.log("executor_result", frame_id=self._frame_count, clicks_sent=execution.clicks_sent, completed_primary=self._action_info_for_diag(execution.completed_primary_action), twin_completed=execution.twin_completion is not None, g_completed=execution.g_click_completed, primary_active=self._active_info_for_diag(self._balloon_executor.primary_scheduler.active_action), twin_active=self._twin_active_for_diag(), g_active=self._active_info_for_diag(self._balloon_executor.g_scheduler.active_action), idle_until=self._balloon_executor._idle_until)
+                        self._log_click_contexts(execution.outcomes, decision=self._balloon_frame_decision, frame_id=self._frame_count, current_detections=detections, tracks=tracks, decision_ready_ts=decision_ready_ts)
                     clicks_this_frame = execution.clicks_sent
                     if execution.input_timestamp is not None:
                         input_ts = execution.input_timestamp
                     action_ts = execution.action_timestamps
 
                     if execution.completed_primary_action is not None:
-                        self._balloon_decision.complete_action(
+                        before_step = self._balloon_decision.state.special_step.value
+                        before_required = (
+                            self._balloon_decision.state.required_special_color.value
+                            if self._balloon_decision.state.required_special_color else None
+                        )
+                        completed = self._balloon_decision.complete_action(
                             execution.completed_primary_action
                         )
+                        after_step = self._balloon_decision.state.special_step.value
+                        after_required = (
+                            self._balloon_decision.state.required_special_color.value
+                            if self._balloon_decision.state.required_special_color else None
+                        )
+                        if self._diagnostic:
+                            self._diagnostic.log(
+                                "decision_state_transition",
+                                frame_id=self._frame_count,
+                                target=self._action_info_for_diag(execution.completed_primary_action),
+                                accepted=completed,
+                                before_step=before_step,
+                                before_required_color=before_required,
+                                after_step=after_step,
+                                after_required_color=after_required,
+                                mode=self._balloon_decision.state.mode.value,
+                            )
 
                     self._total_clicks += execution.clicks_sent
                     for outcome in execution.outcomes:
@@ -733,6 +760,109 @@ class Application:
         if self._diagnostic:
             self._diagnostic.close()
             print(f"Diagnostic trace saved to {self._diagnostic.path}")
+
+    def _log_click_contexts(self, outcomes, *, decision, frame_id: int, current_detections, tracks, decision_ready_ts: float) -> None:
+        if not self._diagnostic or not outcomes:
+            return
+        visible = [
+            {
+                "id": track.id,
+                "type": track.tracking_class,
+                "color": track.color,
+                "center": list(track.position),
+                "width": track.bbox[2] if track.bbox else None,
+                "confidence": track.confidence,
+            }
+            for track in tracks.values()
+            if track.frames_missing == 0
+        ]
+        selected = [self._action_info_for_diag(a) for a in decision.actions]
+        if decision.g_action is not None:
+            selected.append(self._action_info_for_diag(decision.g_action))
+        for outcome in outcomes:
+            lane = "g" if outcome.target_type == "g_symbol" else "primary"
+            self._diagnostic.log(
+                "click_context",
+                frame_id=frame_id,
+                lane=lane,
+                target_id=outcome.target_id,
+                target_type=outcome.target_type,
+                click_position=[outcome.screen_click_x, outcome.screen_click_y],
+                target_first_seen_ts=outcome.target_first_seen_ts,
+                click_down_ts=outcome.actual_click_down_ts,
+                decision_mode=decision.mode.value,
+                special_step=decision.special_step.value,
+                required_special_color=(self._balloon_decision.state.required_special_color.value if self._balloon_decision.state.required_special_color else None),
+                selected_actions=selected,
+                visible_targets=visible[:16],
+                visible_target_count=len(visible),
+                execution_status=outcome.execution_status,
+                decision_to_click_ms=(
+                    (outcome.actual_click_down_ts - decision_ready_ts) * 1000.0
+                    if outcome.actual_click_down_ts is not None
+                    else None
+                ),
+                acquisition_to_click_ms=(
+                    (outcome.actual_click_down_ts - outcome.target_first_seen_ts) * 1000.0
+                    if outcome.actual_click_down_ts is not None and outcome.target_first_seen_ts is not None
+                    else None
+                ),
+            )
+            if outcome.target_id is not None:
+                self._pending_click_observations[outcome.target_id] = {
+                    "click_frame_id": frame_id,
+                    "target_type": outcome.target_type,
+                    "color": next((t.color for t in tracks.values() if t.id == outcome.target_id and t.frames_missing == 0), None),
+                    "click_position": (outcome.screen_click_x, outcome.screen_click_y),
+                    "click_down_ts": outcome.actual_click_down_ts,
+                }
+
+    def _log_click_followups(self, current_detections, *, frame_id: int) -> None:
+        if not self._pending_click_observations:
+            return
+        by_id = {d.get("target_id"): d for d in current_detections}
+        for target_id, context in list(self._pending_click_observations.items()):
+            observed = by_id.get(target_id)
+            nearest_same = None
+            if observed is None and context.get("color"):
+                candidates = [d for d in current_detections if d.get("color_name") == context["color"]]
+                if candidates:
+                    cx, cy = context["click_position"]
+                    nearest_same = min(
+                        candidates,
+                        key=lambda d: (d.get("center", (0, 0))[0] - cx) ** 2 + (d.get("center", (0, 0))[1] - cy) ** 2,
+                    )
+            payload = {
+                "target_id": target_id,
+                "click_frame_id": context["click_frame_id"],
+                "followup_frame_id": frame_id,
+                "target_type": context["target_type"],
+                "target_color": context["color"],
+                "status": "present_next_frame" if observed is not None else "absent_next_frame",
+            }
+            if observed is not None:
+                payload.update({
+                    "followup_center": list(observed.get("center", (0, 0))),
+                    "followup_type": observed.get("target_type"),
+                    "followup_color": observed.get("color_name"),
+                    "center_delta_px": self._distance_px(context["click_position"], observed.get("center")),
+                })
+            elif nearest_same is not None:
+                payload.update({
+                    "nearest_same_color_center": list(nearest_same.get("center", (0, 0))),
+                    "nearest_same_color_distance_px": self._distance_px(context["click_position"], nearest_same.get("center")),
+                    "nearest_same_color_id": nearest_same.get("target_id"),
+                })
+            self._diagnostic.log("click_followup", **payload)
+            del self._pending_click_observations[target_id]
+
+    @staticmethod
+    def _distance_px(first, second) -> float | None:
+        if not first or not second:
+            return None
+        dx = float(first[0]) - float(second[0])
+        dy = float(first[1]) - float(second[1])
+        return (dx * dx + dy * dy) ** 0.5
 
     def _print_benchmark_results(self, durations: list[float], frame_times: list[float]) -> None:
         print("\n" + "=" * 60)
