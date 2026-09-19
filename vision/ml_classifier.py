@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+
+
+IMAGE_SIZE = 96
+DEFAULT_PADDING_PX = 18
+DEFAULT_BATCH_SIZE = 16
+DEFAULT_THRESHOLD = 0.70
+
+LABELS = ("balloon", "duo", "notification", "super_g_ring", "ui")
+
+
+class MLVisionClassifier:
+    """Small local image classifier used after cheap spatial candidate extraction."""
+
+    def __init__(
+        self,
+        checkpoint: str | Path = "training/artifacts/mobilenet_v3_small.pt",
+        *,
+        device: str = "cpu",
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        padding_px: int = DEFAULT_PADDING_PX,
+        threshold: float = DEFAULT_THRESHOLD,
+    ) -> None:
+        import torch
+        from torchvision import transforms
+        from training.train_classifier import IMAGE_SIZE as TRAIN_IMAGE_SIZE
+        from training.train_classifier import make_model
+
+        if device != "cpu":
+            raise ValueError("MLVisionClassifier currently supports CPU only")
+
+        self._torch = torch
+        self._device = torch.device(device)
+        self._batch_size = max(1, int(batch_size))
+        self.padding_px = max(0, int(padding_px))
+        self.threshold = float(threshold)
+
+        checkpoint_path = Path(checkpoint)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(
+                f"ML classifier checkpoint not found: {checkpoint_path}. "
+                "Train it first with python -m training.train_classifier."
+            )
+
+        checkpoint_data = torch.load(
+            checkpoint_path,
+            map_location="cpu",
+            weights_only=True,
+        )
+        self.classes = tuple(str(x) for x in checkpoint_data["classes"])
+        if not self.classes:
+            raise ValueError("ML classifier checkpoint contains no classes")
+
+        self._image_size = int(checkpoint_data.get("image_size", TRAIN_IMAGE_SIZE))
+        self._model = make_model(len(self.classes), pretrained=False).to(self._device)
+        self._model.load_state_dict(checkpoint_data["state_dict"])
+        self._model.eval()
+
+        self._transform = transforms.Compose(
+            [
+                transforms.ToPILImage(),
+                transforms.Resize((self._image_size, self._image_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                ),
+            ]
+        )
+
+    @property
+    def model(self) -> Any:
+        return self._model
+
+    def classify_detections(
+        self,
+        frame_bgr: np.ndarray,
+        detections: list[dict],
+    ) -> list[dict]:
+        """Attach ML predictions to OpenCV candidates without changing game state."""
+        if not detections:
+            return []
+
+        height, width = frame_bgr.shape[:2]
+        prepared: list[tuple[dict, tuple[int, int, int, int]]] = []
+        tensors = []
+
+        for detection in detections:
+            bbox = detection.get("bbox")
+            if not bbox or len(bbox) < 4:
+                continue
+            x, y, w, h = [int(round(float(v))) for v in bbox[:4]]
+            if w <= 0 or h <= 0:
+                continue
+
+            x0 = max(0, x - self.padding_px)
+            y0 = max(0, y - self.padding_px)
+            x1 = min(width, x + w + self.padding_px)
+            y1 = min(height, y + h + self.padding_px)
+            if x1 <= x0 or y1 <= y0:
+                continue
+
+            crop = frame_bgr[y0:y1, x0:x1]
+            if crop.size == 0:
+                continue
+
+            rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            tensors.append(self._transform(rgb))
+            prepared.append((detection, (x0, y0, x1 - x0, y1 - y0)))
+
+        if not tensors:
+            return []
+
+        predictions: list[dict] = []
+        with self._torch.inference_mode():
+            for start in range(0, len(tensors), self._batch_size):
+                batch = self._torch.stack(tensors[start:start + self._batch_size]).to(self._device)
+                probabilities = self._torch.softmax(self._model(batch), dim=1)
+                confidences, indices = probabilities.max(dim=1)
+                for confidence, index in zip(
+                    confidences.detach().cpu().tolist(),
+                    indices.detach().cpu().tolist(),
+                ):
+                    predictions.append(
+                        {
+                            "label": self.classes[int(index)],
+                            "confidence": float(confidence),
+                        }
+                    )
+
+        result: list[dict] = []
+        for (detection, padded_bbox), prediction in zip(prepared, predictions):
+            enriched = dict(detection)
+            metadata = dict(enriched.get("metadata") or {})
+            metadata.update(
+                {
+                    "ml_class": prediction["label"],
+                    "ml_confidence": prediction["confidence"],
+                    "ml_padded_bbox": list(padded_bbox),
+                }
+            )
+            enriched["metadata"] = metadata
+            enriched["ml_class"] = prediction["label"]
+            enriched["ml_confidence"] = prediction["confidence"]
+            result.append(enriched)
+        return result
