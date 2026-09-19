@@ -99,9 +99,9 @@ class BalloonVisionProfilingTests(unittest.TestCase):
 
     def test_hollow_colored_ui_ring_is_not_a_balloon(self):
         profile = BalloonGameProfile()
-        frame = np.zeros((180, 240, 3), dtype=np.uint8)
+        frame = np.full((180, 240, 3), 255, dtype=np.uint8)
 
-        # A zero-like hollow UI glyph: saturated colored edge around an
+        # A hollow UI glyph: saturated colored edge around an
         # enclosed background hole. It deliberately satisfies the size/shape
         # regime of the prior false-positive path.
         cv2.circle(frame, (120, 140), 31, (0, 0, 255), thickness=12)
@@ -115,7 +115,7 @@ class BalloonVisionProfilingTests(unittest.TestCase):
 
     def test_non_balloon_aspect_ratios_are_rejected(self):
         profile = BalloonGameProfile()
-        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        frame = np.full((240, 320, 3), 255, dtype=np.uint8)
 
         # Empirical false-positive shape: ~59x101 (aspect ~0.58).
         cv2.ellipse(frame, (80, 120), (29, 50), 0, 0, 360, (0, 0, 255), thickness=-1)
@@ -142,7 +142,7 @@ class BalloonVisionProfilingTests(unittest.TestCase):
 
     def test_boundary_radial_uniformity_accepts_balloon_like_circle(self):
         profile = BalloonGameProfile()
-        frame = np.zeros((180, 240, 3), dtype=np.uint8)
+        frame = np.full((180, 240, 3), 255, dtype=np.uint8)
         cv2.circle(frame, (120, 80), 25, (255, 0, 0), thickness=-1)
 
         detections = profile.detect(frame)
@@ -164,7 +164,7 @@ class BalloonVisionProfilingTests(unittest.TestCase):
 
     def test_boundary_radial_uniformity_rejects_square_like_ui_shape(self):
         profile = BalloonGameProfile()
-        frame = np.zeros((180, 240, 3), dtype=np.uint8)
+        frame = np.full((180, 240, 3), 255, dtype=np.uint8)
         # A compact UI-like blue region can satisfy the existing bbox,
         # fill, circularity, and solidity gates while having an asymmetric
         # boundary that is not balloon-like.
@@ -195,9 +195,26 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             )
         )
 
+
+    def test_boundary_contrast_is_recorded_for_balloon_candidates(self):
+        profile = BalloonGameProfile()
+        frame = np.full((180, 240, 3), 255, dtype=np.uint8)
+        cv2.circle(frame, (120, 80), 25, (255, 0, 0), thickness=-1)
+
+        detections = profile.detect(frame)
+        self.assertTrue(any(d.get("target_type") == "normal_balloon" for d in detections))
+        candidate = next(
+            g for g in profile.last_profile["candidate_geometry"]
+            if g["color"] == "blue"
+        )
+        self.assertGreaterEqual(
+            candidate["boundary_contrast"],
+            profile._MIN_BOUNDARY_CONTRAST,
+        )
+
     def test_filled_colored_balloon_remains_detectable(self):
         profile = BalloonGameProfile()
-        frame = np.zeros((180, 240, 3), dtype=np.uint8)
+        frame = np.full((180, 240, 3), 255, dtype=np.uint8)
 
         cv2 = __import__("cv2")
         cv2.circle(frame, (120, 80), 25, (0, 0, 255), thickness=-1)

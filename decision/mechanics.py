@@ -73,14 +73,20 @@ class BalloonDecisionEngine:
             self.state.special_sequence_seen = True
 
         if self.state.mode == GameMode.SPECIAL_SEQUENCE:
+            # Super-G is an exclusive sequence: do not let normal balloons,
+            # Gemini, or the G-symbol lane interleave clicks while the four-node
+            # sequence is active. The game itself advances only on the required
+            # color, so the executor receives exactly one eligible target.
             actions = self._select_required_special(special)
+            g_action = None
+            executable_specials = []
         else:
             actions = self._select_normal_play(visible)
 
-        if executable_specials:
-            # Gemini consumes all active notifications when clicked, so a confirmed
-            # Gemini must not be starved behind ordinary balloons in the action lane.
-            actions = executable_specials + list(actions)
+            if executable_specials:
+                # Gemini consumes all active notifications when clicked, so a
+                # confirmed Gemini must not be starved behind ordinary balloons.
+                actions = executable_specials + list(actions)
 
         notification_actions = tuple(self._make_action(d) for d in notifications)
 
