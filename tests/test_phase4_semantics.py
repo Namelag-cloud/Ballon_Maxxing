@@ -101,6 +101,59 @@ class Phase4SemanticTests(unittest.TestCase):
         self.assertFalse(tracker.mark_clicked(1))
         self.assertEqual(tracks[1].click_attempts, 0)
 
+    
+    def test_spatial_suppression_survives_tracker_churn(self):
+        tracker = Tracker(Settings())
+        det = Detection(
+            bbox=(80, 80, 40, 40), center=(100, 100), area=1200,
+            color_name="blue", color_confidence=0.95,
+            outline=OutlineResult(has_outline=False, white_ratio=0.0, contrast=0.0),
+            tracking_class=TargetType.NORMAL_BALLOON.value,
+        )
+        tracker.update([det])
+        tracker.mark_clicked(0)
+        tracker.mark_clicked(0)
+
+        # Lose the old track long enough to force a new track id.
+        for _ in range(6):
+            tracker.update([])
+        tracks = tracker.update([det])
+
+        self.assertEqual(tracks, {})
+
+    def test_super_g_sequence_is_exclusive_and_ordered(self):
+        engine = BalloonDecisionEngine(Settings())
+        specials = []
+        for idx, color in enumerate((
+            BalloonColor.BLUE,
+            BalloonColor.RED,
+            BalloonColor.YELLOW,
+            BalloonColor.GREEN,
+        ), start=1):
+            item = _detection(TargetType.SPECIAL_SEQUENCE_BALLOON, color, (idx * 100, 100), target_id=idx)
+            item["metadata"]["semantic_confirmed"] = True
+            specials.append(item)
+
+        first = engine.decide(specials)
+        self.assertEqual(engine.state.mode.value, "special_sequence")
+        self.assertEqual([a.color for a in first.actions], [BalloonColor.BLUE])
+        self.assertIsNone(first.g_action)
+
+        engine.complete_action(first.actions[0])
+        second = engine.decide(specials)
+        self.assertEqual([a.color for a in second.actions], [BalloonColor.RED])
+
+        engine.complete_action(second.actions[0])
+        third = engine.decide(specials)
+        self.assertEqual([a.color for a in third.actions], [BalloonColor.YELLOW])
+
+        engine.complete_action(third.actions[0])
+        fourth = engine.decide(specials)
+        self.assertEqual([a.color for a in fourth.actions], [BalloonColor.GREEN])
+
+        engine.complete_action(fourth.actions[0])
+        self.assertEqual(engine.state.mode.value, "normal_play")
+
     def test_tracker_emits_temporal_evidence_and_static_ui_signal(self):
         tracker = Tracker(Settings())
         det = Detection(
