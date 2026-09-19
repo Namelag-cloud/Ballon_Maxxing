@@ -61,7 +61,7 @@ class TestBalloonVision(unittest.TestCase):
 
         detections = BalloonGameProfile().detect(frame)
         special = [d for d in detections if d["target_type"] == TargetType.SPECIAL_SEQUENCE_BALLOON.value]
-        self.assertEqual(len(special), 1)
+        self.assertEqual(len(special), 4)
         self.assertEqual({d["color_name"] for d in special}, {"blue", "red", "yellow", "green"})
         self.assertTrue(all(d["visual_features"]["ring_detected"] for d in special))
         self.assertTrue(all(d["metadata"]["semantic_class"] == "super_g_node" for d in special))
