@@ -26,6 +26,7 @@ class CandidateCollector:
         min_repeat_frames: int = 20,
         min_move_px: float = 12.0,
         max_saved_per_key: int = 500,
+        click_crop_size_px: int = 96,
     ) -> None:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.session_name = session_name or f"session_{timestamp}"
@@ -38,6 +39,8 @@ class CandidateCollector:
         self.min_repeat_frames = min_repeat_frames
         self.min_move_px = min_move_px
         self.max_saved_per_key = max_saved_per_key
+        self.click_crop_size_px = click_crop_size_px
+        self._click_count = 0
         self._last_seen: list[dict[str, Any]] = []
         self._saved_counts: dict[str, int] = {}
         self.saved_count = 0
@@ -183,6 +186,48 @@ class CandidateCollector:
             saved += 1
 
         return saved
+
+    def collect_click(
+        self,
+        frame: np.ndarray,
+        *,
+        screen_x: int,
+        screen_y: int,
+        region_left: int,
+        region_top: int,
+        frame_id: int,
+    ) -> bool:
+        """Save one crop for every click action, with no deduplication.
+
+        The crop is centered on the actual screen click coordinate and taken
+        from the frame already being processed. This keeps recording out of
+        the input path: no extra screen capture is performed and misses are
+        recorded exactly like hits.
+        """
+        height, width = frame.shape[:2]
+        frame_x = int(screen_x) - int(region_left)
+        frame_y = int(screen_y) - int(region_top)
+        half = max(1, self.click_crop_size_px // 2)
+
+        x0 = max(0, frame_x - half)
+        y0 = max(0, frame_y - half)
+        x1 = min(width, frame_x + half)
+        y1 = min(height, frame_y + half)
+        if x1 <= x0 or y1 <= y0:
+            return False
+
+        crop = frame[y0:y1, x0:x1]
+        self._click_count += 1
+        filename = (
+            f"click_{self._click_count:07d}_f{frame_id:07d}_"
+            f"{frame_x}_{frame_y}.png"
+        )
+        crop_path = self.crop_dir / filename
+        if not cv2.imwrite(str(crop_path), crop):
+            self._click_count -= 1
+            return False
+        self.saved_count += 1
+        return True
 
     def close(self) -> None:
         self._metadata_file.close()
