@@ -140,6 +140,57 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             )
         )
 
+    def test_boundary_radial_uniformity_accepts_balloon_like_circle(self):
+        profile = BalloonGameProfile()
+        frame = np.zeros((180, 240, 3), dtype=np.uint8)
+        cv2.circle(frame, (120, 80), 25, (255, 0, 0), thickness=-1)
+
+        detections = profile.detect(frame)
+
+        blue = [
+            d for d in detections
+            if d.get("target_type") == "normal_balloon"
+            and d.get("color_name") == "blue"
+        ]
+        self.assertTrue(blue)
+        candidate = next(
+            g for g in profile.last_profile["candidate_geometry"]
+            if g["color"] == "blue"
+        )
+        self.assertLessEqual(
+            candidate["boundary_radial_cv"],
+            profile._MAX_BOUNDARY_RADIAL_CV,
+        )
+
+    def test_boundary_radial_uniformity_rejects_square_like_ui_shape(self):
+        profile = BalloonGameProfile()
+        frame = np.zeros((180, 240, 3), dtype=np.uint8)
+        cv2.rectangle(frame, (95, 55), (145, 105), (255, 0, 0), thickness=-1)
+
+        contour = max(
+            cv2.findContours(
+                cv2.inRange(
+                    cv2.cvtColor(frame, cv2.COLOR_BGR2HSV),
+                    np.array([95, 80, 120], dtype=np.uint8),
+                    np.array([135, 255, 255], dtype=np.uint8),
+                ),
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_NONE,
+            )[0],
+            key=cv2.contourArea,
+        )
+        radial_cv = profile._boundary_radial_cv(contour)
+
+        self.assertGreater(radial_cv, profile._MAX_BOUNDARY_RADIAL_CV)
+        detections = profile.detect(frame)
+        self.assertFalse(
+            any(
+                d.get("target_type") == "normal_balloon"
+                and d.get("color_name") == "blue"
+                for d in detections
+            )
+        )
+
     def test_filled_colored_balloon_remains_detectable(self):
         profile = BalloonGameProfile()
         frame = np.zeros((180, 240, 3), dtype=np.uint8)
