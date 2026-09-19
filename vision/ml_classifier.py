@@ -68,6 +68,7 @@ class MLVisionClassifier:
             "preprocess_ms": 0.0,
             "inference_ms": 0.0,
             "total_ms": 0.0,
+            "class_counts": {},
         }
 
         # Runtime preprocessing intentionally stays NumPy/OpenCV based.
@@ -97,6 +98,7 @@ class MLVisionClassifier:
                 "preprocess_ms": 0.0,
                 "inference_ms": 0.0,
                 "total_ms": 0.0,
+                "class_counts": {},
             }
             return []
 
@@ -107,6 +109,7 @@ class MLVisionClassifier:
             "preprocess_ms": 0.0,
             "inference_ms": 0.0,
             "total_ms": 0.0,
+            "class_counts": {},
         }
         height, width = frame_bgr.shape[:2]
         preprocess_started = time.perf_counter()
@@ -169,6 +172,11 @@ class MLVisionClassifier:
         self._last_stats["inference_ms"] = (time.perf_counter() - inference_started) * 1000.0
 
         result: list[dict] = []
+        class_counts: dict[str, int] = {}
+        for prediction in predictions:
+            label = str(prediction["label"])
+            class_counts[label] = class_counts.get(label, 0) + 1
+        self._last_stats["class_counts"] = class_counts
         for (detection, padded_bbox), prediction in zip(prepared, predictions):
             enriched = dict(detection)
             metadata = dict(enriched.get("metadata") or {})
