@@ -126,6 +126,7 @@ class Application:
         fast_execution: bool = False,
         diagnostics_enabled: bool = True,
         verbose_decisions: bool = False,
+        record_candidates: bool = False,
     ) -> None:
         self._settings = settings
         self._running = True
@@ -134,6 +135,7 @@ class Application:
         self._duration = duration
         self._startup_delay = startup_delay
         self._fast_execution = fast_execution
+        self._record_candidates = record_candidates
         self._start_time = now_monotonic()
         self._game_profile = game_profile
 
@@ -593,6 +595,14 @@ class Application:
         print(f"\nTelemetry saved to {self._telemetry._output_dir}")
 
     def _run_live(self) -> None:
+        candidate_collector = None
+        if self._record_candidates:
+            if self._game_profile is None or self._game_profile.game_type != GameType.BALLOON_GAME:
+                raise ValueError("--record-candidates currently requires --game balloons")
+            candidate_collector = CandidateCollector()
+            print("Candidate recording: ENABLED (screen capture only; clicks are unchanged)")
+            print(f"Saving candidate crops to: {candidate_collector.session_dir}")
+
         if not self._settings.input.enabled:
             print("WARNING: Live mode requested but input.enabled is False in config.")
             print("Setting input.enabled = True for live mode.")
@@ -653,6 +663,13 @@ class Application:
 
                 frame, capture_ts = self._capture.grab()
                 detections, tracks, actions, game_actions = self._process_frame(frame, capture_ts)
+                if candidate_collector is not None:
+                    candidate_collector.collect_frame(
+                        frame,
+                        detections,
+                        frame_id=self._frame_count + 1,
+                        capture_timestamp=capture_ts,
+                    )
                 decision_ready_ts = now_monotonic()
 
                 self._frame_count += 1
@@ -868,6 +885,10 @@ class Application:
         except KeyboardInterrupt:
             pass
         finally:
+            if candidate_collector is not None:
+                candidate_collector.close()
+                print(f"\nCandidate recording complete. {candidate_collector.saved_count} candidate crops saved.")
+                print(f"Candidate session directory: {candidate_collector.session_dir}")
             if self._balloon_executor is not None and self._input_backend is not None:
                 for outcome in self._balloon_executor.shutdown(
                     self._input_backend,
@@ -1128,6 +1149,11 @@ def parse_args(argv=None):
         action="store_true",
         help="Disable JSONL downstream diagnostics for lower-overhead live runs",
     )
+    parser.add_argument(
+        "--record-candidates",
+        action="store_true",
+        help="LIVE balloon mode: passively save detector candidate crops while the bot plays",
+    )
     return parser.parse_args(argv)
 
 
@@ -1193,6 +1219,7 @@ def main():
         fast_execution=args.fast,
         diagnostics_enabled=not args.no_diagnostics,
         verbose_decisions=args.verbose_decisions,
+        record_candidates=args.record_candidates,
     )
     app.run()
 
