@@ -67,7 +67,7 @@ class Phase4SemanticTests(unittest.TestCase):
             area=1200,
             color_name="blue",
             color_confidence=0.95,
-            outline=OutlineResult(),
+            outline=OutlineResult(has_outline=False, white_ratio=0.0, contrast=0.0),
             tracking_class=TargetType.NORMAL_BALLOON.value,
             metadata={"semantic_class": "normal"},
         )
