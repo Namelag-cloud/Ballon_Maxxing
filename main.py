@@ -176,7 +176,10 @@ class Application:
         self._fps_counter_start = now_monotonic()
         self._fps_frame_count = 0
         self._current_fps = 0.0
-        self._last_frame_stage_timings = {}\n        # One-frame follow-up context for classifying post-click behavior.\n        # These are observations only; they never infer authoritative hit state.\n        self._pending_click_observations: dict[int, dict] = {}
+        self._last_frame_stage_timings = {}
+        # One-frame follow-up context for classifying post-click behavior.
+        # These are observations only; they never infer authoritative hit state.
+        self._pending_click_observations: dict[int, dict] = {}
 
     def _setup_hotkeys(self) -> None:
         HK_RSHIFT = 0xA1
@@ -421,6 +424,7 @@ class Application:
 
                 frame, capture_ts = self._capture.grab()
                 detections, tracks, actions, game_actions = self._process_frame(frame)
+                decision_ready_ts = now_monotonic()
 
                 self._frame_count += 1
                 self._fps_frame_count += 1
@@ -571,15 +575,38 @@ class Application:
                     executor_ms = (now_monotonic() - executor_t0) * 1000.0
                     if self._diagnostic:
                         self._diagnostic.log("executor_result", frame_id=self._frame_count, clicks_sent=execution.clicks_sent, completed_primary=self._action_info_for_diag(execution.completed_primary_action), twin_completed=execution.twin_completion is not None, g_completed=execution.g_click_completed, primary_active=self._active_info_for_diag(self._balloon_executor.primary_scheduler.active_action), twin_active=self._twin_active_for_diag(), g_active=self._active_info_for_diag(self._balloon_executor.g_scheduler.active_action), idle_until=self._balloon_executor._idle_until)
+                        self._log_click_contexts(execution.outcomes, decision=self._balloon_frame_decision, frame_id=self._frame_count, current_detections=detections, tracks=tracks, decision_ready_ts=decision_ready_ts)
                     clicks_this_frame = execution.clicks_sent
                     if execution.input_timestamp is not None:
                         input_ts = execution.input_timestamp
                     action_ts = execution.action_timestamps
 
                     if execution.completed_primary_action is not None:
-                        self._balloon_decision.complete_action(
+                        before_step = self._balloon_decision.state.special_step.value
+                        before_required = (
+                            self._balloon_decision.state.required_special_color.value
+                            if self._balloon_decision.state.required_special_color else None
+                        )
+                        completed = self._balloon_decision.complete_action(
                             execution.completed_primary_action
                         )
+                        after_step = self._balloon_decision.state.special_step.value
+                        after_required = (
+                            self._balloon_decision.state.required_special_color.value
+                            if self._balloon_decision.state.required_special_color else None
+                        )
+                        if self._diagnostic:
+                            self._diagnostic.log(
+                                "decision_state_transition",
+                                frame_id=self._frame_count,
+                                target=self._action_info_for_diag(execution.completed_primary_action),
+                                accepted=completed,
+                                before_step=before_step,
+                                before_required_color=before_required,
+                                after_step=after_step,
+                                after_required_color=after_required,
+                                mode=self._balloon_decision.state.mode.value,
+                            )
 
                     self._total_clicks += execution.clicks_sent
                     for outcome in execution.outcomes:
