@@ -458,7 +458,7 @@ class BalloonGameProfile(GameProfile):
             if not (
                 self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
                 and aspect_ok
-                and 0.70 <= bbox_circle_fill <= 1.35
+                and (0.70 <= bbox_circle_fill <= 1.35 or touches_edge)
             ):
                 continue
 
