@@ -54,11 +54,31 @@ class GSymbolDetector:
             (self._MORPH_KERNEL, self._MORPH_KERNEL),
         )
 
-    def detect(self, hsv_frame: np.ndarray) -> list[TargetDetection]:
-        components = {
-            color: self._components_for_color(hsv_frame, color)
-            for color in self._COLORS
-        }
+    def detect(
+        self,
+        hsv_frame: np.ndarray,
+        *,
+        component_hints: dict[str, list[tuple[tuple[int, int, int, int], int, tuple[float, float]]]] | None = None,
+    ) -> list[TargetDetection]:
+        if component_hints is None:
+            components = {
+                color: self._components_for_color(hsv_frame, color)
+                for color in self._COLORS
+            }
+        else:
+            components = {
+                color: [
+                    _ColorComponent(
+                        color=color,
+                        bbox=bbox,
+                        area=int(area),
+                        center=(float(center[0]), float(center[1])),
+                    )
+                    for bbox, area, center in component_hints.get(color.value, [])
+                    if int(area) >= self._MIN_COMPONENT_AREA
+                ]
+                for color in self._COLORS
+            }
         candidates: list[TargetDetection] = []
 
         for red, green, blue in product(
