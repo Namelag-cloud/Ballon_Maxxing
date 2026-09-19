@@ -187,12 +187,19 @@ class BalloonGameProfile(GameProfile):
     def game_type(self) -> GameType:
         return GameType.BALLOON_GAME
 
-    def detect(self, bgr_frame: np.ndarray) -> list[dict]:
-        """Return structured detections serialized for the existing profile API."""
+    def detect_spatial_candidates(self, bgr_frame: np.ndarray) -> list[TargetDetection]:
+        """Generate cheap spatial candidates without game-semantic classification.
+
+        The ML profile uses this boundary directly. Color masks remain available
+        as spatial evidence for downstream mechanics, but Super-G, Duo, G-symbol,
+        and Gemini semantic promotion are deliberately not performed here.
+        """
         total_t0 = time.perf_counter()
         self._last_profile = self._empty_profile()
         self._last_hsv_frame = None
-        self._color_component_hints = {color: [] for color in ("blue", "red", "yellow", "green")}
+        self._color_component_hints = {
+            color: [] for color in ("blue", "red", "yellow", "green")
+        }
 
         hsv_t0 = time.perf_counter()
         hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
@@ -200,11 +207,8 @@ class BalloonGameProfile(GameProfile):
         self._last_profile["hsv_ms"] = (time.perf_counter() - hsv_t0) * 1000.0
 
         candidates: list[TargetDetection] = []
-
         for color_name in ("blue", "red", "yellow", "green"):
-            candidates.extend(
-                self._detect_color_components(hsv, color_name)
-            )
+            candidates.extend(self._detect_color_components(hsv, color_name))
 
         notification_t0 = time.perf_counter()
         notifications = self._detect_notifications(hsv)
@@ -215,6 +219,23 @@ class BalloonGameProfile(GameProfile):
         ) * 1000.0
         self._last_profile["notification_count"] = notification_count
         self._last_profile["notification_halo_candidates"] = notification_count
+        self._last_profile["normal_candidate_count"] = sum(
+            1 for d in candidates if d.target_type == TargetType.NORMAL_BALLOON
+        )
+        self._last_profile["spatial_candidate_count"] = len(candidates)
+        self._last_profile["spatial_total_ms"] = (
+            time.perf_counter() - total_t0
+        ) * 1000.0
+        return candidates
+
+    def detect(self, bgr_frame: np.ndarray) -> list[dict]:
+        """Return structured detections serialized for the existing profile API."""
+        total_t0 = time.perf_counter()
+        candidates = self.detect_spatial_candidates(bgr_frame)
+        hsv = self._last_hsv_frame
+        if hsv is None:
+            raise RuntimeError("Spatial candidate generation did not retain HSV frame")
+        notification_count = self._last_profile["notification_count"]
 
         multicolor_t0 = time.perf_counter()
         candidates.extend(
@@ -223,17 +244,19 @@ class BalloonGameProfile(GameProfile):
                 notification_count=notification_count,
             )
         )
-        self._last_profile["multicolor_ms"] = (time.perf_counter() - multicolor_t0) * 1000.0
+        self._last_profile["multicolor_ms"] = (
+            time.perf_counter() - multicolor_t0
+        ) * 1000.0
 
         g_t0 = time.perf_counter()
         g_detections = self._g_detector.detect(
             hsv,
             component_hints=self._color_component_hints,
         )
-        self._last_profile["g_detector_ms"] = (time.perf_counter() - g_t0) * 1000.0
+        self._last_profile["g_detector_ms"] = (
+            time.perf_counter() - g_t0
+        ) * 1000.0
 
-        # G is a more specific multicolor geometry class. Do not let the generic
-        # Gemini candidate shadow the same image region when both detectors fire.
         g_boxes = [d.bbox for d in g_detections]
         candidates = [
             d for d in candidates
@@ -249,9 +272,6 @@ class BalloonGameProfile(GameProfile):
         ]
         self._last_profile["normal_candidate_count"] = len(normal_candidates)
 
-        # Expensive ring/Hough work is now reserved for a very small set of
-        # newly-arrived, one-per-color candidates that could form the game's
-        # single four-node Super-G. Ordinary balloons no longer pay this cost.
         super_group = self._detect_super_g_group(normal_candidates, bgr_frame)
         if super_group is not None:
             self._last_profile["semantic"]["super_g_confirmed"] = True
@@ -291,13 +311,7 @@ class BalloonGameProfile(GameProfile):
                 )
             classified.append(detection)
 
-        # Golden Duo is a two-object semantic class. A single yellow/green
-        # balloon can never become a twin solely because it has an outline.
         classified = self._classify_golden_duos(classified, bgr_frame)
-
-        # Gemini is one larger multicolor object. The engine only permits one
-        # active Gemini and requires at least two notifications when it spawns;
-        # the visual detector already applies the notification constraint.
         self._last_profile["semantic"]["golden_duo_pairs"] = [
             pair["pair_id"] for pair in self._duo_pairs
         ]
@@ -307,8 +321,15 @@ class BalloonGameProfile(GameProfile):
         assembly_t0 = time.perf_counter()
         classified.sort(key=lambda d: (d.center[1], d.center[0], d.target_type.value))
         result = [d.as_dict() for d in classified]
-        self._last_profile["classification_ms"] += (time.perf_counter() - assembly_t0) * 1000.0
-        self._last_profile["total_ms"] = (time.perf_counter() - total_t0) * 1000.0
+        self._last_profile["classification_ms"] += (
+            time.perf_counter() - assembly_t0
+        ) * 1000.0
+        self._last_profile["semantic_total_ms"] = (
+            time.perf_counter() - classification_t0
+        ) * 1000.0
+        self._last_profile["total_ms"] = (
+            time.perf_counter() - total_t0
+        ) * 1000.0
         return result
 
     def to_tracking_detections(self, detections: list[dict]) -> list[Detection]:
