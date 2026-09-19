@@ -140,12 +140,12 @@ The trained MobileNet checkpoint can be enabled without changing the normal runt
 
 The pipeline is:
 
-    MSS/OpenCV spatial candidates -> MobileNet semantic class -> balloon decision mechanics -> executor
+    MSS -> OpenCV spatial candidates -> MobileNet semantic class -> existing tracker/decision mechanics -> executor
 
-The classifier currently consumes the same padded candidate-crop geometry used by collection and predicts:
+The classifier consumes the spatial candidate crops and predicts:
 balloon, duo, notification, super_g_ring, or ui.
 
-G-symbol and multicolor/Gemini geometry lanes remain on the existing detector because the current five-class dataset does not contain dedicated training labels for those classes.
+The ML path does not run the legacy G-symbol, Super-G, or golden-duo semantic detectors. Those semantics are supplied by the classifier and then passed to the existing game mechanics. Gemini/multicolor remains a narrow mechanics-only observation because the current dataset has no Gemini class; it does not override ML classifications.
 
 Enable the experimental path in PowerShell:
 
@@ -160,4 +160,4 @@ Optional controls:
 
 The ML path is opt-in and the default runtime path is unchanged. Do not enable live input until a dry-run has been compared with the baseline.
 
-The classifier records candidate count and preprocessing/inference/total ML latency in the balloon profile telemetry.
+The runtime profile records spatial-candidate time, ML candidate count, predicted class distribution, accepted/rejected counts, preprocessing time, inference time, and total ML time. Runtime preprocessing uses OpenCV/NumPy rather than PIL transforms to keep the hot path cheap.
