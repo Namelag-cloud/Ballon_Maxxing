@@ -987,18 +987,24 @@ class BalloonGameProfile(GameProfile):
                 ):
                     continue
 
-                first.metadata = {
-                    **first.metadata,
-                    "twin_ring_color_ratio": first_ring_score,
-                    "twin_ring_sector_coverage": first_ring_coverage,
-                    "twin_text_score": first_text_score,
-                }
-                second.metadata = {
-                    **second.metadata,
-                    "twin_ring_color_ratio": second_ring_score,
-                    "twin_ring_sector_coverage": second_ring_coverage,
-                    "twin_text_score": second_text_score,
-                }
+                first = replace(
+                    first,
+                    metadata={
+                        **first.metadata,
+                        "twin_ring_color_ratio": first_ring_score,
+                        "twin_ring_sector_coverage": first_ring_coverage,
+                        "twin_text_score": first_text_score,
+                    },
+                )
+                second = replace(
+                    second,
+                    metadata={
+                        **second.metadata,
+                        "twin_ring_color_ratio": second_ring_score,
+                        "twin_ring_sector_coverage": second_ring_coverage,
+                        "twin_text_score": second_text_score,
+                    },
+                )
                 pairs.append((first, second))
                 used.update({i, j})
                 break
