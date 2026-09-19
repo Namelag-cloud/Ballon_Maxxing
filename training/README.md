@@ -29,16 +29,22 @@ Populate these folders with image crops:
 training/dataset/
   train/
     balloon/
+    duo/
+    super_g_ring/
     ui/
     notification/
     unknown/
   val/
     balloon/
+    duo/
+    super_g_ring/
     ui/
     notification/
     unknown/
   test/
     balloon/
+    duo/
+    super_g_ring/
     ui/
     notification/
     unknown/
@@ -68,7 +74,7 @@ The script uses a pretrained MobileNetV3-Small backbone and fine-tunes it for th
 
 1. Run the bot with the current fast OpenCV detector.
 2. Save candidate crops from false positives and true balloons.
-3. Label them into the four classes.
+3. Label them into the six human-label classes.
 4. Retrain.
 5. Measure validation accuracy and, more importantly, false-positive rejection on a held-out set of UI glyphs.
 6. Integrate the classifier only after inference latency is measured on the actual Windows machine.
@@ -110,7 +116,7 @@ Persistent candidates are sampled rather than saved every frame. A candidate can
 
 Do one short validation run first (about 60–120 seconds). Inspect the number and variety of crops before collecting the larger dataset. A useful first collection target is roughly **5–8 runs of 2–5 minutes each**, then label and inspect the class balance before collecting more.
 
-Important: the collector saves detector candidates, not automatic ground-truth labels. Human labeling remains the source of truth for `balloon`, `ui`, `notification`, and `unknown`.
+Important: the collector saves detector candidates, not automatic ground-truth labels. Human labeling remains the source of truth for `balloon`, `duo`, `super_g_ring`, `ui`, `notification`, and `unknown`.
 
 
 ## Human labeling
