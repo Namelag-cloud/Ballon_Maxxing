@@ -766,14 +766,15 @@ class Application:
             return
         visible = [
             {
-                "id": d.get("target_id"),
-                "type": d.get("target_type"),
-                "color": d.get("color_name"),
-                "center": list(d.get("center", (0, 0))),
-                "width": d.get("width"),
-                "confidence": d.get("confidence"),
+                "id": track.id,
+                "type": track.tracking_class,
+                "color": track.color,
+                "center": list(track.position),
+                "width": track.bbox[2] if track.bbox else None,
+                "confidence": track.confidence,
             }
-            for d in current_detections
+            for track in tracks.values()
+            if track.frames_missing == 0
         ]
         selected = [self._action_info_for_diag(a) for a in decision.actions]
         if decision.g_action is not None:
@@ -811,7 +812,7 @@ class Application:
                 self._pending_click_observations[outcome.target_id] = {
                     "click_frame_id": frame_id,
                     "target_type": outcome.target_type,
-                    "color": next((d.get("color_name") for d in current_detections if d.get("target_id") == outcome.target_id), None),
+                    "color": next((t.color for t in tracks.values() if t.id == outcome.target_id and t.frames_missing == 0), None),
                     "click_position": (outcome.screen_click_x, outcome.screen_click_y),
                     "click_down_ts": outcome.actual_click_down_ts,
                 }
