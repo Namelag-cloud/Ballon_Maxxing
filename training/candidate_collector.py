@@ -25,7 +25,7 @@ class CandidateCollector:
         padding_px: int = 18,
         min_repeat_frames: int = 20,
         min_move_px: float = 12.0,
-        max_saved_per_key: int = 50,
+        max_saved_per_key: int = 500,
     ) -> None:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.session_name = session_name or f"session_{timestamp}"
