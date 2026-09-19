@@ -75,7 +75,15 @@ class BalloonVisionProfilingTests(unittest.TestCase):
         self.assertTrue(required.issubset(second_profile))
         self.assertEqual(first_profile["candidate_geometry"], second_profile["candidate_geometry"])
 
-        timing_keys = required - {"candidate_counts", "normal_candidate_count", "ring_call_count", "hough_call_count", "component_count", "ring_circles_returned"}
+        timing_keys = required - {
+            "candidate_counts",
+            "normal_candidate_count",
+            "ring_call_count",
+            "hough_call_count",
+            "component_count",
+            "ring_circles_returned",
+            "semantic",
+        }
         for key in timing_keys:
             self.assertGreaterEqual(first_profile[key], 0.0)
 
