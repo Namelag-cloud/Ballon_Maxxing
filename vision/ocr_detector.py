@@ -37,11 +37,23 @@ class OCRSnapshot:
 
 
 class OCRDetector:
-    """Asynchronous full-screen OCR used as a safety/semantic layer.
+    """Asynchronous OCR safety/semantic layer for the game viewport.
 
-    The worker continuously OCRs the newest submitted frame and drops stale
-    queued frames. The main vision loop consumes the newest completed result.
+    The game is rendered in a fixed central viewport on the 1920x1080 fullscreen
+    layout. OCR is therefore restricted to that viewport instead of the entire
+    browser frame. The worker continuously OCRs the newest submitted viewport
+    and drops stale queued frames; the main vision loop consumes the newest
+    completed result.
     """
+
+    # Fullscreen 1920x1080 game viewport, measured from the actual game layout.
+    # Keep a small margin around the visible card so floating text near its edge
+    # is still captured. Coordinates are screen-space (left, top, width, height).
+    _GAME_ROI = (540, 75, 575, 815)
+    # OCR is deliberately sampled rather than submitted on every vision frame.
+    # This keeps Tesseract from monopolizing CPU while its latest result remains
+    # available asynchronously to the fast vision loop.
+    _OCR_INTERVAL_FRAMES = 2
 
     _MIN_CONFIDENCE = 35.0
     _OVERLAP_REJECT = 0.18
@@ -57,7 +69,7 @@ class OCRDetector:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
-        self._pending: tuple[np.ndarray, int] | None = None
+        self._pending: tuple[np.ndarray, int, int, int] | None = None
         self._latest_words: tuple[OCRWord, ...] = ()
         self._latest_frame_id = -1
         self._worker = threading.Thread(
@@ -69,14 +81,36 @@ class OCRDetector:
 
     def observe(self, frame: np.ndarray, frame_id: int) -> OCRSnapshot:
         with self._condition:
-            self._pending = (frame.copy(), frame_id)
-            self._condition.notify()
+            if frame_id % self._OCR_INTERVAL_FRAMES == 0:
+                roi, origin_x, origin_y = self._crop_game_roi(frame)
+                # Only copy the small game viewport. Copying the full 1920x1080
+                # frame here would erase much of the benefit of ROI OCR.
+                self._pending = (roi.copy(), frame_id, origin_x, origin_y)
+                self._condition.notify()
             age = frame_id - self._latest_frame_id if self._latest_frame_id >= 0 else frame_id + 1
             return OCRSnapshot(
                 words=self._latest_words,
                 completed_frame_id=self._latest_frame_id,
                 age_frames=max(0, age),
             )
+
+    @classmethod
+    def _crop_game_roi(cls, frame: np.ndarray) -> tuple[np.ndarray, int, int]:
+        """Return the game viewport plus its screen-space origin.
+
+        The configured ROI is for the 1920x1080 fullscreen layout. If a smaller
+        or differently shaped frame is supplied, clamp it rather than failing;
+        this keeps unit tests and non-fullscreen callers safe.
+        """
+        frame_height, frame_width = frame.shape[:2]
+        x, y, width, height = cls._GAME_ROI
+        x0 = max(0, min(x, frame_width))
+        y0 = max(0, min(y, frame_height))
+        x1 = max(x0, min(x + width, frame_width))
+        y1 = max(y0, min(y + height, frame_height))
+        if x1 <= x0 or y1 <= y0:
+            return frame, 0, 0
+        return frame[y0:y1, x0:x1], x0, y0
 
     def classify_bbox(
         self,
@@ -165,11 +199,11 @@ class OCRDetector:
             with self._condition:
                 while self._pending is None:
                     self._condition.wait()
-                frame, frame_id = self._pending
+                frame, frame_id, origin_x, origin_y = self._pending
                 self._pending = None
 
             try:
-                words = self._run_ocr(frame)
+                words = self._run_ocr(frame, origin=(origin_x, origin_y))
             except Exception:
                 words = ()
 
@@ -178,7 +212,12 @@ class OCRDetector:
                 self._latest_frame_id = frame_id
 
     @classmethod
-    def _run_ocr(cls, frame: np.ndarray) -> tuple[OCRWord, ...]:
+    def _run_ocr(
+        cls,
+        frame: np.ndarray,
+        *,
+        origin: tuple[int, int] = (0, 0),
+    ) -> tuple[OCRWord, ...]:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
         data = pytesseract.image_to_data(
             gray,
@@ -199,8 +238,8 @@ class OCRDetector:
             if confidence < cls._MIN_CONFIDENCE:
                 continue
 
-            x = int(data["left"][index])
-            y = int(data["top"][index])
+            x = int(data["left"][index]) + origin[0]
+            y = int(data["top"][index]) + origin[1]
             w = int(data["width"][index])
             h = int(data["height"][index])
             if w <= 0 or h <= 0:
