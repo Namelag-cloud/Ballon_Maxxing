@@ -244,6 +244,58 @@ class BalloonVisionProfilingTests(unittest.TestCase):
         self.assertTrue(any(d.get("target_type") == "normal_balloon" for d in red))
         self.assertGreaterEqual(profile.last_profile["score_ui_rejections"], 1)
 
+    def test_notification_requires_red_halo(self):
+        profile = BalloonGameProfile()
+        frame = np.full((220, 260, 3), 255, dtype=np.uint8)
+        # White body without the source-visible red/pink halo is not enough.
+        cv2.circle(frame, (130, 110), 28, (235, 235, 235), thickness=-1)
+        detections = profile.detect(frame)
+        self.assertFalse(any(d.get("target_type") == "notification" for d in detections))
+
+        # Add the characteristic red halo around the same white body.
+        cv2.circle(frame, (130, 110), 38, (80, 80, 255), thickness=5)
+        detections = profile.detect(frame)
+        notifications = [
+            d for d in detections if d.get("target_type") == "notification"
+        ]
+        self.assertEqual(len(notifications), 1)
+        self.assertGreater(
+            notifications[0]["metadata"]["notification_halo_score"],
+            profile._NOTIFICATION_HALO_MIN_RATIO,
+        )
+
+    def test_matching_color_outline_is_cheap_twin_evidence(self):
+        profile = BalloonGameProfile()
+        frame = np.full((260, 420, 3), 255, dtype=np.uint8)
+
+        # Two small green balloon bodies with matching green circular outlines.
+        cv2.circle(frame, (115, 125), 22, (80, 190, 80), thickness=-1)
+        cv2.circle(frame, (115, 125), 34, (0, 180, 0), thickness=2)
+        cv2.circle(frame, (295, 125), 22, (80, 190, 80), thickness=-1)
+        cv2.circle(frame, (295, 125), 34, (0, 180, 0), thickness=2)
+
+        detections = profile.detect(frame)
+        twins = [
+            d for d in detections if d.get("target_type") == "twin_balloon"
+        ]
+        self.assertEqual(len(twins), 2)
+        for twin in twins:
+            self.assertGreater(
+                twin["metadata"]["twin_ring_color_ratio"],
+                profile._TWIN_RING_MIN_COLOR_RATIO,
+            )
+
+    def test_single_small_colored_balloon_does_not_become_twin(self):
+        profile = BalloonGameProfile()
+        frame = np.full((180, 240, 3), 255, dtype=np.uint8)
+        cv2.circle(frame, (120, 90), 22, (80, 190, 80), thickness=-1)
+        cv2.circle(frame, (120, 90), 34, (0, 180, 0), thickness=2)
+
+        detections = profile.detect(frame)
+        self.assertFalse(
+            any(d.get("target_type") == "twin_balloon" for d in detections)
+        )
+
     def test_filled_colored_balloon_remains_detectable(self):
         profile = BalloonGameProfile()
         frame = np.full((180, 240, 3), 255, dtype=np.uint8)
