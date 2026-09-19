@@ -652,6 +652,8 @@ class Application:
                         if self._last_feedback is not None:
                             outcome.feedback_confidence = self._last_feedback.confidence
                             outcome.observation_notes.extend(self._last_feedback.notes)
+                        if outcome.target_id is not None:
+                            self._tracker.mark_clicked(outcome.target_id)
                         self._telemetry.record_outcome(outcome)
 
                 elif self._behavior and self._action_scheduler:
