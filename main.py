@@ -1333,7 +1333,17 @@ def main():
         game_profile=game_profile,
         duration=args.duration,
         startup_delay=args.startup_delay,
-        fast_execution=args.fast,
+        # Balloon gameplay is latency-sensitive; keep the humanized behavioral
+        # scheduler available for explicit non-balloon uses, but live balloon
+        # execution defaults to immediate dispatch. --fast remains accepted.
+        fast_execution=(
+            args.fast
+            or (
+                settings.mode == RunMode.LIVE
+                and game_profile is not None
+                and game_profile.game_type == GameType.BALLOON_GAME
+            )
+        ),
         diagnostics_enabled=not args.no_diagnostics,
         verbose_decisions=args.verbose_decisions,
         record_candidates=args.record_candidates,
