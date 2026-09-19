@@ -123,6 +123,9 @@ class BalloonDecisionEngine:
         for index, detection in enumerate(detections):
             target_type = detection.get("target_type")
             if target_type == TargetType.NORMAL_BALLOON.value:
+                temporal = detection.get("metadata", {}).get("temporal", {})
+                if temporal.get("static_ui_suspect", False):
+                    continue
                 normal.append((index, detection))
             elif (
                 target_type == TargetType.TWIN_BALLOON.value
