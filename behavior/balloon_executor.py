@@ -331,71 +331,85 @@ class BalloonExecutor:
                 input_timestamp=input_timestamp,
             )
 
-        action = actions[0]
-        if isinstance(action, TwinAction):
-            first, second = action.targets
-            first_xy = self._to_screen(first.position, region_left, region_top)
-            second_xy = self._to_screen(second.position, region_left, region_top)
-            first_behavior = self._fast_behavioral_action(first_xy, first.target_width)
-            second_behavior = self._fast_behavioral_action(second_xy, second.target_width)
-            first_down, first_up, second_down, second_up = input_backend.click_pair(
-                first_xy,
-                second_xy,
-                0.0,
-            )
-            first_ts = ActionTimestamps(
-                action_planned=first_down,
-                reaction_start=first_down,
-                reaction_end=first_down,
-                movement_start=first_down,
-                movement_end=first_down,
-                click_down=first_down,
-                click_up=first_up,
-                action_complete=first_up,
-            )
-            second_ts = ActionTimestamps(
-                action_planned=second_down,
-                reaction_start=second_down,
-                reaction_end=second_down,
-                movement_start=second_down,
-                movement_end=second_down,
-                click_down=second_down,
-                click_up=second_up,
-                action_complete=second_up,
-            )
-            twin_completion = TwinActionCompletion(
-                first_ts,
-                second_ts,
-                abs(first_down - second_down) * 1000.0,
-                0.0,
-            )
-            clicks += 2
-            input_timestamp = max(first_up, second_up)
-            action_timestamps = first_ts
-            outcomes.extend(
-                (
-                    self._make_outcome(
-                        first_behavior,
-                        first_ts,
-                        first_xy[0],
-                        first_xy[1],
-                        first.target_type.value,
-                        target_id=first.target_id,
-                        execution_status="fast",
-                    ),
-                    self._make_outcome(
-                        second_behavior,
-                        second_ts,
-                        second_xy[0],
-                        second_xy[1],
-                        second.target_type.value,
-                        target_id=second.target_id,
-                        execution_status="fast",
-                    ),
+        # The fast path is intentionally throughput-oriented: the decision
+        # engine has already filtered the current observation, so do not throw
+        # away visible gameplay targets by clicking only actions[0]. Normal
+        # balloons can all be dispatched in this frame; a TwinAction remains
+        # one atomic pair. Special-sequence mode still supplies at most one
+        # action, so the strict B->R->Y->G order is preserved.
+        seen_ids: set[int] = set()
+        for action in actions:
+            if isinstance(action, TwinAction):
+                first, second = action.targets
+                pair_ids = (first.target_id, second.target_id)
+                if any(target_id is not None and target_id in seen_ids for target_id in pair_ids):
+                    continue
+                first_xy = self._to_screen(first.position, region_left, region_top)
+                second_xy = self._to_screen(second.position, region_left, region_top)
+                first_behavior = self._fast_behavioral_action(first_xy, first.target_width)
+                second_behavior = self._fast_behavioral_action(second_xy, second.target_width)
+                first_down, first_up, second_down, second_up = input_backend.click_pair(
+                    first_xy,
+                    second_xy,
+                    0.0,
                 )
-            )
-            completed_primary_action = action
-        else:
+                first_ts = ActionTimestamps(
+                    action_planned=first_down,
+                    reaction_start=first_down,
+                    reaction_end=first_down,
+                    movement_start=first_down,
+                    movement_end=first_down,
+                    click_down=first_down,
+                    click_up=first_up,
+                    action_complete=first_up,
+                )
+                second_ts = ActionTimestamps(
+                    action_planned=second_down,
+                    reaction_start=second_down,
+                    reaction_end=second_down,
+                    movement_start=second_down,
+                    movement_end=second_down,
+                    click_down=second_down,
+                    click_up=second_up,
+                    action_complete=second_up,
+                )
+                twin_completion = TwinActionCompletion(
+                    first_ts,
+                    second_ts,
+                    abs(first_down - second_down) * 1000.0,
+                    0.0,
+                )
+                clicks += 2
+                input_timestamp = max(first_up, second_up)
+                action_timestamps = first_ts
+                outcomes.extend(
+                    (
+                        self._make_outcome(
+                            first_behavior,
+                            first_ts,
+                            first_xy[0],
+                            first_xy[1],
+                            first.target_type.value,
+                            target_id=first.target_id,
+                            execution_status="fast",
+                        ),
+                        self._make_outcome(
+                            second_behavior,
+                            second_ts,
+                            second_xy[0],
+                            second_xy[1],
+                            second.target_type.value,
+                            target_id=second.target_id,
+                            execution_status="fast",
+                        ),
+                    )
+                )
+                completed_primary_action = action
+                seen_ids.update(target_id for target_id in pair_ids if target_id is not None)
+                continue
+
+            if action.target_id is not None and action.target_id in seen_ids:
+                continue
             screen_xy = self._to_screen(action.position, region_left, region_top)
             behavioral_action = self._fast_behavioral_action(
                 screen_xy,
@@ -416,6 +430,8 @@ class BalloonExecutor:
                     execution_status="fast",
                 )
             )
+            if action.target_id is not None:
+                seen_ids.add(action.target_id)
             if self._diagnostic:
                 self._diagnostic.log(
                     "fast_click",
@@ -424,7 +440,6 @@ class BalloonExecutor:
                     click_down_ts=action_timestamps.click_down,
                     click_up_ts=action_timestamps.click_up,
                 )
-
         return BalloonExecutionResult(
             clicks_sent=clicks,
             input_timestamp=input_timestamp,
