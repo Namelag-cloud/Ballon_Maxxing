@@ -654,7 +654,7 @@ class BalloonGameProfile(GameProfile):
             )
             hull_area = cv2.contourArea(cv2.convexHull(contour))
             solidity = contour_area / hull_area if hull_area > 0 else 0.0
-            if not (0.20 <= circularity <= 0.60 and 0.45 <= solidity <= 0.85):
+            if circularity < 0.20 or solidity < 0.25:
                 continue
 
             multicolor_score = self._multicolor_score(hsv[y:y + h, x:x + w])
