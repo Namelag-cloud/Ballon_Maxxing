@@ -109,3 +109,32 @@ Persistent candidates are sampled rather than saved every frame. A candidate can
 Do one short validation run first (about 60–120 seconds). Inspect the number and variety of crops before collecting the larger dataset. A useful first collection target is roughly **5–8 runs of 2–5 minutes each**, then label and inspect the class balance before collecting more.
 
 Important: the collector saves detector candidates, not automatic ground-truth labels. Human labeling remains the source of truth for `balloon`, `ui`, `notification`, and `unknown`.
+
+
+## Human labeling
+
+After a collector validation run, label the saved crops before collecting a large dataset:
+
+```powershell
+python training/label_candidates.py training/raw/session_YYYYMMDD_HHMMSS
+```
+
+The labeler shows one candidate crop at a time and persists progress to:
+
+```
+training/raw/session_YYYYMMDD_HHMMSS/labels.json
+```
+
+Keys:
+
+- `B` — balloon
+- `U` — UI
+- `N` — notification
+- `X` — unknown
+- `S` — skip
+- Left/Right — navigate
+- `Q` or `Esc` — quit and save
+
+Already-labeled crops are skipped when the session is resumed. The labels are human ground truth; detector metadata is only context and is not treated as a label.
+
+Do not copy the first 25-crop validation run directly into train/val/test yet. First inspect whether the collector is producing useful, varied candidates. After several collection sessions have been labeled, build the dataset with care to avoid near-duplicate frames leaking across train/validation/test.
