@@ -10,12 +10,11 @@ from game_profiles.balloon_types import TargetType
 
 
 class MLBalloonGameProfile(BalloonGameProfile):
-    """Balloon profile with ML semantic classification after OpenCV candidates.
+    """Balloon profile using OpenCV spatial candidates + ML semantics.
 
-    OpenCV remains the spatial candidate source. MobileNet owns the semantic
-    class used by the downstream decision engine. Existing G-symbol and
-    multicolor geometry lanes are preserved because the current ML dataset does
-    not contain those classes.
+    OpenCV supplies candidate geometry and visual evidence. MobileNet owns the
+    semantic class for candidates covered by the trained model. Game mechanics
+    remain downstream and decide priorities/sequences/timing.
     """
 
     def __init__(
@@ -35,34 +34,31 @@ class MLBalloonGameProfile(BalloonGameProfile):
         )
 
     def detect(self, bgr_frame: np.ndarray) -> list[dict]:
-        candidates = super().detect(bgr_frame)
+        total_t0 = __import__("time").perf_counter()
+        candidates = self.detect_spatial_candidates(bgr_frame)
 
-        # The current five-class model has no G-symbol/Gemini labels. Keep
-        # those geometry-specific lanes untouched until representative data
-        # exists for them.
-        semantic_candidates = [
-            detection
-            for detection in candidates
-            if detection.get("target_type") not in {
-                TargetType.G_SYMBOL.value,
-                TargetType.MULTICOLOR_SPECIAL.value,
-            }
-        ]
-        preserved = [
-            detection
-            for detection in candidates
-            if detection.get("target_type") in {
-                TargetType.G_SYMBOL.value,
-                TargetType.MULTICOLOR_SPECIAL.value,
-            }
-        ]
+        # Gemini has no trained ML class yet. Keep this narrow mechanics-only
+        # observation so enabling ML does not silently remove an existing game
+        # object. It is not used to classify ordinary candidates.
+        hsv = self._last_hsv_frame
+        if hsv is None:
+            raise RuntimeError("Spatial candidate generation did not retain HSV frame")
+        notification_count = self._last_profile["notification_count"]
+        multicolor_t0 = __import__("time").perf_counter()
+        gemini = self._detect_multicolor_special(
+            hsv,
+            notification_count=notification_count,
+        )
+        self._last_profile["multicolor_ms"] = (
+            __import__("time").perf_counter() - multicolor_t0
+        ) * 1000.0
 
         classified = self._ml_classifier.classify_detections(
             bgr_frame,
-            semantic_candidates,
+            [d.as_dict() for d in candidates],
         )
-        self._last_profile["ml"] = dict(self._ml_classifier._last_stats)
-        self._last_profile["ml_candidate_count"] = len(semantic_candidates)
+        self._last_profile["ml"] = dict(self._ml_classifier.last_stats)
+        self._last_profile["ml_candidate_count"] = len(candidates)
 
         result: list[dict] = []
         for detection in classified:
@@ -76,24 +72,27 @@ class MLBalloonGameProfile(BalloonGameProfile):
                 continue
 
             if label == "notification":
-                detection["target_type"] = TargetType.NOTIFICATION.value
-                detection["is_twin"] = False
-                detection["is_special_sequence"] = False
+                target_type = TargetType.NOTIFICATION.value
+                is_twin = False
+                is_special = False
             elif label == "duo":
-                detection["target_type"] = TargetType.TWIN_BALLOON.value
-                detection["is_twin"] = True
-                detection["is_special_sequence"] = False
+                target_type = TargetType.TWIN_BALLOON.value
+                is_twin = True
+                is_special = False
             elif label == "super_g_ring":
-                detection["target_type"] = TargetType.SPECIAL_SEQUENCE_BALLOON.value
-                detection["is_twin"] = False
-                detection["is_special_sequence"] = True
+                target_type = TargetType.SPECIAL_SEQUENCE_BALLOON.value
+                is_twin = False
+                is_special = True
             elif label == "balloon":
-                detection["target_type"] = TargetType.NORMAL_BALLOON.value
-                detection["is_twin"] = False
-                detection["is_special_sequence"] = False
+                target_type = TargetType.NORMAL_BALLOON.value
+                is_twin = False
+                is_special = False
             else:
                 continue
 
+            detection["target_type"] = target_type
+            detection["is_twin"] = is_twin
+            detection["is_special_sequence"] = is_special
             detection["confidence"] = confidence
             detection["ml_confidence"] = confidence
             detection["metadata"] = {
@@ -105,13 +104,26 @@ class MLBalloonGameProfile(BalloonGameProfile):
             result.append(detection)
 
         self._assign_ml_duo_pairs(result)
-        result.extend(preserved)
-        result.sort(key=lambda d: (d.get("center", (0, 0))[1], d.get("center", (0, 0))[0]))
+
+        # Preserve only the dedicated mechanics-only Gemini lane. It is not
+        # allowed to override ML semantics for ordinary candidates.
+        for detection in gemini:
+            result.append(detection.as_dict())
+
+        result.sort(key=lambda d: (
+            d.get("center", (0, 0))[1],
+            d.get("center", (0, 0))[0],
+            d.get("target_type", ""),
+        ))
+        self._last_profile["ml_semantic_total_ms"] = (
+            __import__("time").perf_counter() - total_t0
+        ) * 1000.0
+        self._last_profile["total_ms"] = self._last_profile["ml_semantic_total_ms"]
         return result
 
     @staticmethod
     def _assign_ml_duo_pairs(detections: list[dict]) -> None:
-        """Give exactly two nearby ML-duo candidates a shared mechanics pair id."""
+        """Give nearby ML-duo candidates a shared mechanics pair id."""
         twins = [
             d for d in detections
             if d.get("target_type") == TargetType.TWIN_BALLOON.value
@@ -134,7 +146,10 @@ class MLBalloonGameProfile(BalloonGameProfile):
                 b = second.get("center")
                 if not a or not b:
                     continue
-                distance = math.hypot(float(a[0]) - float(b[0]), float(a[1]) - float(b[1]))
+                distance = math.hypot(
+                    float(a[0]) - float(b[0]),
+                    float(a[1]) - float(b[1]),
+                )
                 if 50.0 <= distance <= 150.0 and distance < best_distance:
                     best_index = second_index
                     best_distance = distance
