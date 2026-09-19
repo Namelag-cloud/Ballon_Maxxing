@@ -27,14 +27,20 @@ class CandidateCollector:
         min_move_px: float = 12.0,
         max_saved_per_key: int = 500,
         click_crop_size_px: int = 96,
+        write_metadata: bool = True,
     ) -> None:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.session_name = session_name or f"session_{timestamp}"
         self.session_dir = Path(root) / self.session_name
         self.crop_dir = self.session_dir / "crops"
         self.crop_dir.mkdir(parents=True, exist_ok=True)
+        self.write_metadata = write_metadata
         self.metadata_path = self.session_dir / "metadata.jsonl"
-        self._metadata_file = self.metadata_path.open("a", encoding="utf-8")
+        self._metadata_file = (
+            self.metadata_path.open("a", encoding="utf-8")
+            if write_metadata
+            else None
+        )
         self.padding_px = padding_px
         self.min_repeat_frames = min_repeat_frames
         self.min_move_px = min_move_px
@@ -177,8 +183,9 @@ class CandidateCollector:
                 "candidate_index": index,
                 "detection": self._json_safe(detection),
             }
-            self._metadata_file.write(json.dumps(metadata, separators=(",", ":")) + "\n")
-            self._metadata_file.flush()
+            if self._metadata_file is not None:
+                self._metadata_file.write(json.dumps(metadata, separators=(",", ":")) + "\n")
+                self._metadata_file.flush()
 
             self._saved_counts[key] = self._saved_counts.get(key, 0) + 1
             self._remember(frame_id, key, (x, y, w, h))
@@ -230,7 +237,8 @@ class CandidateCollector:
         return True
 
     def close(self) -> None:
-        self._metadata_file.close()
+        if self._metadata_file is not None:
+            self._metadata_file.close()
 
     def __enter__(self) -> "CandidateCollector":
         return self
