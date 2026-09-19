@@ -177,6 +177,52 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         )
         self.assertEqual(len(self.input.downs), 3)
 
+    def test_fast_execution_suppresses_recently_clicked_normal_target(self):
+        executor = BalloonExecutor(
+            self.behavior,
+            clock=self.clock,
+            initial_mouse_position=(0, 0),
+            fast_execution=True,
+        )
+        first = self.engine.decide([
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (100, 100), 60),
+        ])
+        result = executor.tick(first.actions, None, self.input, 0, 0, True)
+        self.assertEqual(result.clicks_sent, 1)
+
+        # The popped balloon is still visible in the next captured frame.
+        # The tracker may keep the same ID or briefly emit a nearby replacement
+        # ID, so both forms must be suppressed during the short render-lag window.
+        same_id = self.engine.decide([
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (100, 100), 60),
+        ])
+        result = executor.tick(same_id.actions, None, self.input, 0, 0, True)
+        self.assertEqual(result.clicks_sent, 0)
+
+        churned_id = self.engine.decide([
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (108, 106), 61),
+        ])
+        result = executor.tick(churned_id.actions, None, self.input, 0, 0, True)
+        self.assertEqual(result.clicks_sent, 0)
+        self.assertEqual(len(self.input.downs), 1)
+
+        # A genuinely different target outside the suppression radius is still clickable.
+        different = self.engine.decide([
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (140, 100), 62),
+        ])
+        result = executor.tick(different.actions, None, self.input, 0, 0, True)
+        self.assertEqual(result.clicks_sent, 1)
+        self.assertEqual(len(self.input.downs), 2)
+
+        # Once the render-lag window expires, the same target may be clicked again.
+        self.clock.value = 0.201
+        visible_again = self.engine.decide([
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (100, 100), 63),
+        ])
+        result = executor.tick(visible_again.actions, None, self.input, 0, 0, True)
+        self.assertEqual(result.clicks_sent, 1)
+        self.assertEqual(len(self.input.downs), 3)
+
     def test_normal_target_runs_behavior_scheduler_execution_path(self):
         decision = self.engine.decide([
             balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.RED, (100, 100), 1)
