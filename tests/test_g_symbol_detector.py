@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import cv2
 
@@ -60,6 +61,26 @@ class TestGSymbolDetector(unittest.TestCase):
         self.assertEqual(len(detections), 1)
         self.assertEqual(detections[0].target_type, TargetType.G_SYMBOL)
         self.assertEqual(detections[0].bbox[0], 0)
+
+    def test_component_hints_bypass_rebuilding_color_masks(self):
+        hsv = cv2.cvtColor(g_symbol_frame(), cv2.COLOR_BGR2HSV)
+        hints = {
+            color.value: [
+                (component.bbox, component.area, component.center)
+                for component in self.detector._components_for_color(hsv, color)
+            ]
+            for color in self.detector._COLORS
+        }
+
+        with patch.object(
+            self.detector._classifier,
+            "make_color_mask",
+            side_effect=AssertionError("color masks should be reused"),
+        ):
+            detections = self.detector.detect(hsv, component_hints=hints)
+
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].target_type, TargetType.G_SYMBOL)
 
     def test_multicolor_star_is_not_g(self):
         detections = self.detector.detect(
