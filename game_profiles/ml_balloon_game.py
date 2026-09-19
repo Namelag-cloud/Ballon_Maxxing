@@ -45,13 +45,13 @@ class MLBalloonGameProfile(BalloonGameProfile):
         if hsv is None:
             raise RuntimeError("Spatial candidate generation did not retain HSV frame")
         notification_count = self._last_profile["notification_count"]
-        multicolor_t0 = __import__("time").perf_counter()
+        multicolor_t0 = time.perf_counter()
         gemini = self._detect_multicolor_special(
             hsv,
             notification_count=notification_count,
         )
         self._last_profile["multicolor_ms"] = (
-            __import__("time").perf_counter() - multicolor_t0
+            time.perf_counter() - multicolor_t0
         ) * 1000.0
 
         classified = self._ml_classifier.classify_detections(
@@ -122,7 +122,7 @@ class MLBalloonGameProfile(BalloonGameProfile):
             d.get("target_type", ""),
         ))
         self._last_profile["ml_semantic_total_ms"] = (
-            __import__("time").perf_counter() - total_t0
+            time.perf_counter() - total_t0
         ) * 1000.0
         self._last_profile["total_ms"] = self._last_profile["ml_semantic_total_ms"]
         return result
