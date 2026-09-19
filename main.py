@@ -9,6 +9,19 @@ import threading
 import queue
 from typing import Optional
 
+
+class _MouseHookStruct(ctypes.Structure):
+    """Windows low-level mouse hook payload (MSLLHOOKSTRUCT)."""
+
+    _fields_ = [
+        ("pt_x", ctypes.wintypes.LONG),
+        ("pt_y", ctypes.wintypes.LONG),
+        ("mouseData", ctypes.wintypes.DWORD),
+        ("flags", ctypes.wintypes.DWORD),
+        ("time", ctypes.wintypes.DWORD),
+        ("dwExtraInfo", ctypes.wintypes.ULONG_PTR),
+    ]
+
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except Exception:
@@ -719,6 +732,7 @@ class Application:
 
                 frame, capture_ts = self._capture.grab()
                 detections, tracks, actions, game_actions = self._process_frame(frame, capture_ts)
+                region = self._settings.capture.region
                 if candidate_collector is not None:
                     self._drain_manual_clicks(
                         frame,
