@@ -12,10 +12,12 @@ MSS -> cheap OpenCV candidate detection -> tiny classifier (only when needed) ->
 
 The classifier is intended to distinguish visually similar candidate patches such as:
 
-- `balloon`
-- `ui`
-- `notification`
-- `unknown`
+- `balloon` — ordinary balloon
+- `duo` — golden-duo/twin balloon member
+- `super_g_ring` — Super-G node with its active ring
+- `ui` — static/game UI artifact
+- `notification` — white notification balloon
+- `unknown` — anything that does not fit the above
 
 Do not feed the 1920x1080 screen directly to the model. Training data should be small candidate crops, ideally around 64-96 px per side.
 
@@ -128,6 +130,8 @@ training/raw/session_YYYYMMDD_HHMMSS/labels.json
 Keys:
 
 - `B` — balloon
+- `D` — duo/twin balloon
+- `G` — Super-G node with active ring
 - `U` — UI
 - `N` — notification
 - `X` — unknown
@@ -135,6 +139,6 @@ Keys:
 - Left/Right — navigate
 - `Q` or `Esc` — quit and save
 
-Already-labeled crops are skipped when the session is resumed. The labels are human ground truth; detector metadata is only context and is not treated as a label.
+Already-labeled crops are skipped when the session is resumed. The labels are human ground truth; detector metadata is only context and is not treated as a label. For a Super-G crop, use `G` only when the active ring is visible; otherwise use the appropriate ordinary/special class based on what is actually visible.
 
 Do not copy the first 25-crop validation run directly into train/val/test yet. First inspect whether the collector is producing useful, varied candidates. After several collection sessions have been labeled, build the dataset with care to avoid near-duplicate frames leaking across train/validation/test.
