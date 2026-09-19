@@ -165,7 +165,11 @@ class BalloonVisionProfilingTests(unittest.TestCase):
     def test_boundary_radial_uniformity_rejects_square_like_ui_shape(self):
         profile = BalloonGameProfile()
         frame = np.zeros((180, 240, 3), dtype=np.uint8)
-        cv2.rectangle(frame, (95, 55), (145, 105), (255, 0, 0), thickness=-1)
+        # A compact UI-like blue region can satisfy the existing bbox,
+        # fill, circularity, and solidity gates while having an asymmetric
+        # boundary that is not balloon-like.
+        cv2.circle(frame, (120, 80), 25, (255, 0, 0), thickness=-1)
+        cv2.rectangle(frame, (145, 73), (160, 87), (255, 0, 0), thickness=-1)
 
         contour = max(
             cv2.findContours(
