@@ -244,6 +244,33 @@ class BalloonGameProfile(GameProfile):
         )
         self._last_profile["g_detector_ms"] = (time.perf_counter() - g_t0) * 1000.0
 
+        # OCR is also a safety veto for G-shaped colored UI glyphs. Genuine
+        # G-symbols do not contain numeric/UI text.
+        filtered_g: list[TargetDetection] = []
+        for detection in g_detections:
+            ocr_info = self._ocr.classify_bbox(
+                detection.bbox,
+                snapshot=self._ocr_snapshot,
+            )
+            if (
+                (ocr_info["ocr_numeric"] or ocr_info["ocr_ui_text"])
+                and not ocr_info["ocr_twin_text"]
+            ):
+                self._last_profile["ocr_rejections"] += 1
+                continue
+            filtered_g.append(
+                replace(
+                    detection,
+                    metadata={
+                        **detection.metadata,
+                        "ocr_text": list(ocr_info["ocr_text"]),
+                        "ocr_confidence": float(ocr_info["ocr_confidence"]),
+                        "ocr_age_frames": int(ocr_info["ocr_age_frames"] or 0),
+                    },
+                )
+            )
+        g_detections = filtered_g
+
         # G is a more specific multicolor geometry class. Do not let the generic
         # Gemini candidate shadow the same image region when both detectors fire.
         g_boxes = [d.bbox for d in g_detections]
@@ -791,6 +818,17 @@ class BalloonGameProfile(GameProfile):
             if multicolor_score < 0.12:
                 continue
 
+            ocr_info = self._ocr.classify_bbox(
+                (x, y, w, h),
+                snapshot=self._ocr_snapshot,
+            )
+            if (
+                (ocr_info["ocr_numeric"] or ocr_info["ocr_ui_text"])
+                and not ocr_info["ocr_twin_text"]
+            ):
+                self._last_profile["ocr_rejections"] += 1
+                continue
+
             detections.append(
                 TargetDetection(
                     target_type=TargetType.MULTICOLOR_SPECIAL,
@@ -810,6 +848,9 @@ class BalloonGameProfile(GameProfile):
                         "semantic_class": "gemini",
                         "semantic_confirmed": True,
                         "notification_count": notification_count,
+                        "ocr_text": list(ocr_info["ocr_text"]),
+                        "ocr_confidence": float(ocr_info["ocr_confidence"]),
+                        "ocr_age_frames": int(ocr_info["ocr_age_frames"] or 0),
                     },
                 )
             )
@@ -1018,6 +1059,11 @@ class BalloonGameProfile(GameProfile):
                     second_text_score = self._twin_text_likeness(
                         self._last_hsv_frame, second.bbox
                     )
+                    # Full-screen OCR is the primary text semantic signal.
+                    # Keep the old cheap pixel heuristic only as a fallback
+                    # when OCR has not recognized the tiny phrase yet.
+                    first_ocr_text_ok = bool(first.metadata.get("ocr_twin_text"))
+                    second_ocr_text_ok = bool(second.metadata.get("ocr_twin_text"))
                     visual_evidence_available = True
 
                 first_ring_ok = (
@@ -1030,10 +1076,12 @@ class BalloonGameProfile(GameProfile):
                 )
                 first_text_ok = first_text_score >= self._TWIN_TEXT_MIN_SCORE
                 second_text_ok = second_text_score >= self._TWIN_TEXT_MIN_SCORE
+                if not visual_evidence_available:
+                    first_ocr_text_ok = second_ocr_text_ok = False
 
                 if visual_evidence_available and not (
-                    (first_ring_ok or first_text_ok)
-                    and (second_ring_ok or second_text_ok)
+                    (first_ring_ok or first_text_ok or first_ocr_text_ok)
+                    and (second_ring_ok or second_text_ok or second_ocr_text_ok)
                 ):
                     continue
 
