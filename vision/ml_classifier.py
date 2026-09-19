@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import time
 
 import cv2
 import numpy as np
@@ -62,6 +63,14 @@ class MLVisionClassifier:
         self._model.load_state_dict(checkpoint_data["state_dict"])
         self._model.eval()
 
+        self._last_stats = {
+            "candidate_count": 0,
+            "classified_count": 0,
+            "preprocess_ms": 0.0,
+            "inference_ms": 0.0,
+            "total_ms": 0.0,
+        }
+
         self._transform = transforms.Compose(
             [
                 transforms.ToPILImage(),
@@ -85,9 +94,25 @@ class MLVisionClassifier:
     ) -> list[dict]:
         """Attach ML predictions to OpenCV candidates without changing game state."""
         if not detections:
+            self._last_stats = {
+                "candidate_count": 0,
+                "classified_count": 0,
+                "preprocess_ms": 0.0,
+                "inference_ms": 0.0,
+                "total_ms": 0.0,
+            }
             return []
 
+        total_started = time.perf_counter()
+        self._last_stats = {
+            "candidate_count": len(detections),
+            "classified_count": 0,
+            "preprocess_ms": 0.0,
+            "inference_ms": 0.0,
+            "total_ms": 0.0,
+        }
         height, width = frame_bgr.shape[:2]
+        preprocess_started = time.perf_counter()
         prepared: list[tuple[dict, tuple[int, int, int, int]]] = []
         tensors = []
 
@@ -114,10 +139,13 @@ class MLVisionClassifier:
             tensors.append(self._transform(rgb))
             prepared.append((detection, (x0, y0, x1 - x0, y1 - y0)))
 
+        self._last_stats["preprocess_ms"] = (time.perf_counter() - preprocess_started) * 1000.0
         if not tensors:
+            self._last_stats["total_ms"] = (time.perf_counter() - total_started) * 1000.0
             return []
 
         predictions: list[dict] = []
+        inference_started = time.perf_counter()
         with self._torch.inference_mode():
             for start in range(0, len(tensors), self._batch_size):
                 batch = self._torch.stack(tensors[start:start + self._batch_size]).to(self._device)
@@ -133,6 +161,7 @@ class MLVisionClassifier:
                             "confidence": float(confidence),
                         }
                     )
+        self._last_stats["inference_ms"] = (time.perf_counter() - inference_started) * 1000.0
 
         result: list[dict] = []
         for (detection, padded_bbox), prediction in zip(prepared, predictions):
@@ -149,4 +178,6 @@ class MLVisionClassifier:
             enriched["ml_class"] = prediction["label"]
             enriched["ml_confidence"] = prediction["confidence"]
             result.append(enriched)
+        self._last_stats["classified_count"] = len(result)
+        self._last_stats["total_ms"] = (time.perf_counter() - total_started) * 1000.0
         return result
