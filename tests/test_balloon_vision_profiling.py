@@ -70,6 +70,7 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             "candidate_counts",
             "candidate_geometry",
             "ring_circles_returned",
+            "semantic",
         }
         self.assertTrue(required.issubset(first_profile))
         self.assertTrue(required.issubset(second_profile))
@@ -83,6 +84,7 @@ class BalloonVisionProfilingTests(unittest.TestCase):
             "component_count",
             "ring_circles_returned",
             "semantic",
+            "candidate_geometry",
         }
         for key in timing_keys:
             self.assertGreaterEqual(first_profile[key], 0.0)
