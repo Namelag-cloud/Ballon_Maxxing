@@ -244,7 +244,7 @@ class BalloonGameProfile(GameProfile):
 
         # Golden Duo is a two-object semantic class. A single yellow/green
         # balloon can never become a twin solely because it has an outline.
-        classified = self._classify_golden_duos(classified)
+        classified = self._classify_golden_duos(classified, bgr_frame)
 
         # Gemini is one larger multicolor object. The engine only permits one
         # active Gemini and requires at least two notifications when it spawns;
@@ -432,10 +432,20 @@ class BalloonGameProfile(GameProfile):
 
             fill_ratio = float(area) / float(w * h)
             aspect_ratio = float(w) / float(h)
+            touches_edge = (
+                x == 0
+                or y == 0
+                or x + w >= hsv.shape[1]
+                or y + h >= hsv.shape[0]
+            )
+            aspect_ok = (
+                self._CORE_MIN_ASPECT_RATIO <= aspect_ratio <= self._CORE_MAX_ASPECT_RATIO
+                or (touches_edge and circularity >= 0.55)
+            )
             if not (
                 self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
                 and circularity >= self._CORE_MIN_CIRCULARITY
-                and self._CORE_MIN_ASPECT_RATIO <= aspect_ratio <= self._CORE_MAX_ASPECT_RATIO
+                and aspect_ok
             ):
                 continue
 
@@ -613,15 +623,19 @@ class BalloonGameProfile(GameProfile):
 
         color_values = {c.value for c in self._SUPER_G_COLORS}
         new_by_color: dict[str, TargetDetection] = {}
+        new_candidates: list[TargetDetection] = []
         for candidate in candidates:
             if not self._is_new_candidate(candidate):
                 continue
             color = candidate.color.value
-            if color not in color_values or color in new_by_color:
+            if color not in color_values:
+                continue
+            new_candidates.append(candidate)
+            if color in new_by_color:
                 continue
             new_by_color[color] = candidate
 
-        if set(new_by_color) != color_values:
+        if len(new_candidates) != len(color_values) or set(new_by_color) != color_values:
             return None
 
         confirmed: list[TargetDetection] = []
@@ -697,14 +711,16 @@ class BalloonGameProfile(GameProfile):
     def _classify_golden_duos(
         self,
         detections: list[TargetDetection],
+        bgr_frame: np.ndarray | None = None,
     ) -> list[TargetDetection]:
         """Classify Golden Duo only when a complete visual pair is present.
 
         The engine creates exactly two golden_duo objects, both radius 25 in
         solo mode, and enforces at least 60 game units between their centers.
-        The screen-only approximation therefore requires two same-color,
-        small, white-bordered candidates separated by the source-grounded
-        minimum. A lone yellow/green balloon can never become a twin.
+        The screen-only approximation requires two same-color, small candidates
+        separated by the source-grounded minimum and, when the frame is available,
+        matching circular-outline evidence. A lone yellow/green balloon can never
+        become a twin.
         """
         candidates = [
             d for d in detections
@@ -733,6 +749,13 @@ class BalloonGameProfile(GameProfile):
                 )
                 if distance < self._GOLDEN_DUO_MIN_DISTANCE_PX:
                     continue
+                if bgr_frame is not None:
+                    first_ring = self._ring.detect(bgr_frame, first.bbox)
+                    self._record_ring_profile(first_ring)
+                    second_ring = self._ring.detect(bgr_frame, second.bbox)
+                    self._record_ring_profile(second_ring)
+                    if not (first_ring.detected and second_ring.detected):
+                        continue
                 pairs.append((first, second))
                 used.update({i, j})
                 break
