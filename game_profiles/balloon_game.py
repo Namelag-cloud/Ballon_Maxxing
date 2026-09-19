@@ -216,14 +216,12 @@ class BalloonGameProfile(GameProfile):
             ]
 
         classified: list[TargetDetection] = []
-        normal_classified: list[TargetDetection] = []
         for detection in candidates:
             if detection.target_type != TargetType.NORMAL_BALLOON or detection.color is None:
                 classified.append(detection)
                 continue
 
             metadata = dict(detection.metadata)
-            color_key = detection.color.value
             confirmed = next(
                 (d for d in super_group or [] if d.center == detection.center),
                 None,
@@ -242,7 +240,6 @@ class BalloonGameProfile(GameProfile):
                         "semantic_confirmed": True,
                     },
                 )
-            normal_classified.append(detection)
             classified.append(detection)
 
         # Golden Duo is a two-object semantic class. A single yellow/green
@@ -701,6 +698,14 @@ class BalloonGameProfile(GameProfile):
         self,
         detections: list[TargetDetection],
     ) -> list[TargetDetection]:
+        """Classify Golden Duo only when a complete visual pair is present.
+
+        The engine creates exactly two golden_duo objects, both radius 25 in
+        solo mode, and enforces at least 60 game units between their centers.
+        The screen-only approximation therefore requires two same-color,
+        small, white-bordered candidates separated by the source-grounded
+        minimum. A lone yellow/green balloon can never become a twin.
+        """
         candidates = [
             d for d in detections
             if d.target_type == TargetType.NORMAL_BALLOON
@@ -708,6 +713,7 @@ class BalloonGameProfile(GameProfile):
             and max(d.width, d.height) <= self._GOLDEN_DUO_MAX_DIAMETER_PX
             and d.visual_features.white_border_ratio >= self._TWIN_WHITE_BORDER_RATIO
         ]
+
         pairs: list[tuple[TargetDetection, TargetDetection]] = []
         used: set[int] = set()
         for i, first in enumerate(candidates):
@@ -719,42 +725,42 @@ class BalloonGameProfile(GameProfile):
                 second = candidates[j]
                 if first.color != second.color:
                     continue
-                distance = (
-                    (first.center[0] - second.center[0]) ** 2
-                    + (first.center[1] - second.center[1]) ** 2
-                ) ** 0.5
+                distance = float(
+                    np.hypot(
+                        first.center[0] - second.center[0],
+                        first.center[1] - second.center[1],
+                    )
+                )
                 if distance < self._GOLDEN_DUO_MIN_DISTANCE_PX:
                     continue
-                pair_id = f"golden_duo:{first.center[0]}:{first.center[1]}:{second.center[0]}:{second.center[1]}"
                 pairs.append((first, second))
-                self._duo_pairs = [
-                    *[
-                        p for p in self._duo_pairs
-                        if self._semantic_frame - p["last_frame"] <= self._GOLDEN_DUO_MAX_MISSING_FRAMES
-                    ],
-                    {
-                        "pair_id": pair_id,
-                        "color": first.color.value,
-                        "centers": (first.center, second.center),
-                        "last_frame": self._semantic_frame,
-                    },
-                ]
                 used.update({i, j})
                 break
 
+        pair_ids: dict[int, str] = {}
+        for first, second in pairs:
+            ordered = sorted((first.center, second.center))
+            pair_id = (
+                f"golden_duo:{ordered[0][0]}:{ordered[0][1]}:"
+                f"{ordered[1][0]}:{ordered[1][1]}"
+            )
+            pair_ids[id(first)] = pair_id
+            pair_ids[id(second)] = pair_id
+
+        self._duo_pairs = [
+            {
+                "pair_id": pair_id,
+                "last_frame": self._semantic_frame,
+            }
+            for pair_id in set(pair_ids.values())
+        ]
+
         result: list[TargetDetection] = []
-        pair_members = {id(d): pair for pair in pairs for d in pair}
         for detection in detections:
-            pair = pair_members.get(id(detection))
-            if pair is None:
+            pair_id = pair_ids.get(id(detection))
+            if pair_id is None:
                 result.append(detection)
                 continue
-            pair_id = next(
-                p["pair_id"]
-                for p in self._duo_pairs
-                if p["last_frame"] == self._semantic_frame
-                and p["centers"] == (pair[0].center, pair[1].center)
-            )
             result.append(
                 replace(
                     detection,
