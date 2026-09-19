@@ -1045,6 +1045,11 @@ def parse_args(argv=None):
         help="Balloon mode: bypass behavioral reaction/movement/click delays and dispatch input immediately",
     )
     parser.add_argument(
+        "--verbose-decisions",
+        action="store_true",
+        help="Print compact human-readable detections, decisions, rejections, and executions",
+    )
+    parser.add_argument(
         "--no-diagnostics",
         action="store_true",
         help="Disable JSONL downstream diagnostics for lower-overhead live runs",
