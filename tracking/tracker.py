@@ -38,6 +38,8 @@ class Tracker:
         self._tracks: dict[int, BalloonTrack] = {}
         self._next_id: int = 0
         self._frame_count: int = 0
+        self._suppressed_regions: list[dict] = []
+        self._suppression_radius_px: float = 55.0
 
     @property
     def tracks(self) -> dict[int, BalloonTrack]:
@@ -49,6 +51,22 @@ class Tracker:
 
         for track in self._tracks.values():
             track.frames_missing += 1
+
+        # Remove expired spatial suppressions. Region-based suppression prevents
+        # a persistent UI false positive from resetting its click budget when
+        # tracking briefly loses the component.
+        self._suppressed_regions = [
+            item for item in self._suppressed_regions
+            if self._frame_count - item["frame"] <= self._config.max_frames_missing * 12
+        ]
+
+        detections = [
+            det for det in detections
+            if not (
+                det.tracking_class == "normal_balloon"
+                and self._is_suppressed_region(det)
+            )
+        ]
 
         matched_detection_indices: set[int] = set()
         matched_track_ids: set[int] = set()
@@ -138,7 +156,29 @@ class Tracker:
             **dict(track.metadata),
             "click_attempts": track.click_attempts,
         }
+        if track.click_attempts >= 2:
+            self._suppressed_regions.append({
+                "center": track.position,
+                "bbox": track.bbox,
+                "color": track.color,
+                "frame": self._frame_count,
+            })
         return True
+
+    def _is_suppressed_region(self, det: Detection) -> bool:
+        for item in self._suppressed_regions:
+            if item["color"] != det.color_name:
+                continue
+            dx = float(det.center[0] - item["center"][0])
+            dy = float(det.center[1] - item["center"][1])
+            if (dx * dx + dy * dy) ** 0.5 > self._suppression_radius_px:
+                continue
+            _, _, sw, sh = item["bbox"]
+            _, _, dw, dh = det.bbox
+            if max(sw, sh, dw, dh) / max(1.0, min(sw, sh, dw, dh)) > 2.0:
+                continue
+            return True
+        return False
 
     def _update_track(self, track_id: int, det: Detection, now: float) -> None:
         track = self._tracks[track_id]
