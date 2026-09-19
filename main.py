@@ -734,7 +734,7 @@ class Application:
             self._diagnostic.close()
             print(f"Diagnostic trace saved to {self._diagnostic.path}")
 
-    def _log_click_contexts(self, outcomes, *, decision, frame_id: int, current_detections, tracks) -> None:
+    def _log_click_contexts(self, outcomes, *, decision, frame_id: int, current_detections, tracks, decision_ready_ts: float) -> None:
         if not self._diagnostic or not outcomes:
             return
         visible = [
@@ -770,6 +770,11 @@ class Application:
                 visible_target_count=len(visible),
                 execution_status=outcome.execution_status,
                 decision_to_click_ms=(
+                    (outcome.actual_click_down_ts - decision_ready_ts) * 1000.0
+                    if outcome.actual_click_down_ts is not None
+                    else None
+                ),
+                acquisition_to_click_ms=(
                     (outcome.actual_click_down_ts - outcome.target_first_seen_ts) * 1000.0
                     if outcome.actual_click_down_ts is not None and outcome.target_first_seen_ts is not None
                     else None
