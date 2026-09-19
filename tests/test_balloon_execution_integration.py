@@ -157,6 +157,26 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
                 return result
         self.fail("primary action did not complete")
 
+    def test_fast_execution_dispatches_all_visible_normal_targets(self):
+        executor = BalloonExecutor(
+            self.behavior,
+            clock=self.clock,
+            initial_mouse_position=(0, 0),
+            fast_execution=True,
+        )
+        decision = self.engine.decide([
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (100, 100), 50),
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (200, 200), 51),
+            balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (300, 300), 52),
+        ])
+        result = executor.tick(decision.actions, None, self.input, 0, 0, True)
+        self.assertEqual(result.clicks_sent, 3)
+        self.assertEqual(
+            [(x, y) for _, x, y in self.input.moves],
+            [(100, 100), (200, 200), (300, 300)],
+        )
+        self.assertEqual(len(self.input.downs), 3)
+
     def test_normal_target_runs_behavior_scheduler_execution_path(self):
         decision = self.engine.decide([
             balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.RED, (100, 100), 1)
