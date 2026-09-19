@@ -59,6 +59,48 @@ class Phase4SemanticTests(unittest.TestCase):
 
         self.assertEqual([a.target_id for a in result.actions], [2])
 
+    def test_persistent_normal_is_suppressed_after_two_click_attempts(self):
+        engine = BalloonDecisionEngine(Settings())
+        detection = _detection(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (100, 100), target_id=1)
+
+        self.assertEqual(len(engine.decide([detection]).actions), 1)
+        detection["metadata"]["click_attempts"] = 1
+        self.assertEqual(len(engine.decide([detection]).actions), 1)
+        detection["metadata"]["click_attempts"] = 2
+        self.assertEqual(engine.decide([detection]).actions, ())
+
+    def test_twin_is_not_suppressed_by_click_attempt_count(self):
+        engine = BalloonDecisionEngine(Settings())
+        first = _detection(TargetType.TWIN_BALLOON, BalloonColor.GREEN, (100, 100), target_id=1)
+        second = _detection(TargetType.TWIN_BALLOON, BalloonColor.GREEN, (180, 100), target_id=2)
+        for d in (first, second):
+            d["metadata"].update({"semantic_confirmed": True, "semantic_pair_id": "pair-1", "click_attempts": 5})
+
+        result = engine.decide([first, second])
+        self.assertEqual(len(result.actions), 1)
+        self.assertEqual(type(result.actions[0]).__name__, "TwinAction")
+
+    def test_tracker_click_attempts_only_apply_to_normal_balloons(self):
+        tracker = Tracker(Settings())
+        normal = Detection(
+            bbox=(80, 80, 40, 40), center=(100, 100), area=1200,
+            color_name="blue", color_confidence=0.95,
+            outline=OutlineResult(has_outline=False, white_ratio=0.0, contrast=0.0),
+            tracking_class=TargetType.NORMAL_BALLOON.value,
+        )
+        twin = Detection(
+            bbox=(180, 80, 40, 40), center=(200, 100), area=1200,
+            color_name="green", color_confidence=0.95,
+            outline=OutlineResult(has_outline=False, white_ratio=0.0, contrast=0.0),
+            tracking_class=TargetType.TWIN_BALLOON.value,
+        )
+        tracks = tracker.update([normal, twin])
+        self.assertTrue(tracker.mark_clicked(0))
+        self.assertTrue(tracker.mark_clicked(0))
+        self.assertEqual(tracks[0].click_attempts, 2)
+        self.assertFalse(tracker.mark_clicked(1))
+        self.assertEqual(tracks[1].click_attempts, 0)
+
     def test_tracker_emits_temporal_evidence_and_static_ui_signal(self):
         tracker = Tracker(Settings())
         det = Detection(
