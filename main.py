@@ -1168,6 +1168,11 @@ def main():
     if args.no_gui:
         settings.debug.show_detections = False
 
+    if settings.mode == RunMode.COLLECT:
+        # Collection is structurally input-free, even if a custom config enables input.
+        settings.input.enabled = False
+        settings.behavior.enabled = False
+
     print(f"Mode: {settings.mode.value}")
     if game_profile:
         print(f"Game: {game_profile.name}")
