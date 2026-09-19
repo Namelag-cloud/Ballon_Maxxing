@@ -82,7 +82,9 @@ class BalloonGameProfile(GameProfile):
         self._semantic_frame = 0
         self._candidate_history: list[dict] = []
         self._super_group: dict[str, tuple[float, float]] | None = None
+        self._super_group_last_seen: dict[str, int] = {}
         self._super_group_age = 0
+        self._super_g_terminal = False
         self._duo_pairs: list[dict] = []
 
     @staticmethod
@@ -271,6 +273,7 @@ class BalloonGameProfile(GameProfile):
             pair["pair_id"] for pair in self._duo_pairs
         ]
 
+        self._maintain_super_group(classified)
         self._update_candidate_history(classified)
         assembly_t0 = time.perf_counter()
         classified.sort(key=lambda d: (d.center[1], d.center[0], d.target_type.value))
@@ -353,7 +356,9 @@ class BalloonGameProfile(GameProfile):
         self._semantic_frame = 0
         self._candidate_history = []
         self._super_group = None
+        self._super_group_last_seen = {}
         self._super_group_age = 0
+        self._super_g_terminal = False
         self._duo_pairs = []
 
     def _detect_color_components(
@@ -711,7 +716,7 @@ class BalloonGameProfile(GameProfile):
         then applied only to those four candidates, rather than every ordinary
         balloon.
         """
-        if self._super_group is not None:
+        if self._super_group is not None or self._super_g_terminal:
             return None
 
         color_values = {c.value for c in self._SUPER_G_COLORS}
@@ -756,6 +761,11 @@ class BalloonGameProfile(GameProfile):
             for detection in confirmed
             if detection.color is not None
         }
+        self._super_group_last_seen = {
+            detection.color.value: self._semantic_frame
+            for detection in confirmed
+            if detection.color is not None
+        }
         self._super_group_age = 0
         return confirmed
 
@@ -784,8 +794,32 @@ class BalloonGameProfile(GameProfile):
                 float(detection.center[0]),
                 float(detection.center[1]),
             )
+            self._super_group_last_seen[detection.color.value] = self._semantic_frame
             return True
         return False
+
+    def _maintain_super_group(self, detections: list[TargetDetection]) -> None:
+        if self._super_group is None:
+            return
+        visible_colors = {
+            d.color.value
+            for d in detections
+            if d.target_type == TargetType.SPECIAL_SEQUENCE_BALLOON
+            and d.metadata.get("semantic_group") == "super_g"
+            and d.color is not None
+        }
+        if visible_colors:
+            self._super_group_age = 0
+            return
+
+        self._super_group_age += 1
+        if self._super_group_age < 8:
+            return
+
+        # Super-G is scheduled once per game. Once its four nodes have all been
+        # absent for a sustained interval, never manufacture a second group.
+        self._super_group = None
+        self._super_g_terminal = True
 
     def _is_new_candidate(self, detection: TargetDetection) -> bool:
         if detection.color is None:
