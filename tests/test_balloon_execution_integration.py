@@ -70,6 +70,10 @@ class FakeBehavior:
         self.plans = 0
         self.click_duration_s = 0.0
 
+    def should_fail_super_g(self) -> bool:
+        # This must no longer affect deterministic G precursor execution.
+        return True
+
     def plan_action(self, **_kwargs) -> BehavioralAction:
         self.plans += 1
         return BehavioralAction(
@@ -164,6 +168,12 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         self.assertEqual(self.input.ups, [0.0])
 
     def test_special_sequence_completes_only_after_scheduler_completion(self):
+        self.engine.decide([
+            balloon_action(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (100, 100), 10),
+            balloon_action(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (900, 100), 11),
+            balloon_action(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.YELLOW, (1500, 100), 12),
+            balloon_action(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (300, 900), 13),
+        ])
         decision = self.engine.decide([
             balloon_action(
                 TargetType.SPECIAL_SEQUENCE_BALLOON,
@@ -179,6 +189,7 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
             self.engine.state.required_special_color,
             BalloonColor.RED,
         )
+        self.assertGreaterEqual(self.executor._idle_until, 0.100)
 
         next_decision = self.engine.decide([
             balloon_action(
