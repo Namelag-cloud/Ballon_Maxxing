@@ -112,6 +112,10 @@ class BalloonDecisionEngine:
                 # confirmed Gemini must not be starved behind ordinary balloons.
                 actions = executable_specials + list(actions)
 
+        # g_active describes the actual executable G lane for this observation,
+        # including the post-sequence Super-G. It is intentionally not sticky.
+        self.state.g_active = g_action is not None
+
         notification_actions = tuple(self._make_action(d) for d in notifications)
 
         return DecisionResult(
