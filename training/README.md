@@ -114,6 +114,14 @@ training/raw/session_YYYYMMDD_HHMMSS/
 
 Persistent candidates are sampled rather than saved every frame. A candidate can be sampled again after it moves or changes substantially. The raw session directory is gitignored.
 
+You can also record candidates while the bot is actively playing. This keeps the bot's existing click/decision path unchanged and saves the same detector candidates for later human labeling:
+
+```powershell
+python main.py --mode live --game balloons --fullscreen --fast --record-candidates --startup-delay 5 --duration 180
+```
+
+This mode **does not use the bot's predictions as labels**. It only records the detector's candidate crops while the bot plays. Human labeling remains the ground truth. A new recording session is created under `training/raw/`, just like collection mode.
+
 Do one short validation run first (about 60–120 seconds). Inspect the number and variety of crops before collecting the larger dataset. A useful first collection target is roughly **5–8 runs of 2–5 minutes each**, then label and inspect the class balance before collecting more.
 
 Important: the collector saves detector candidates, not automatic ground-truth labels. Human labeling remains the source of truth for `balloon`, `duo`, `super_g_ring`, `ui`, `notification`, and `unknown`.
