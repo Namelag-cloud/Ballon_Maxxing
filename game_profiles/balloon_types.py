@@ -114,7 +114,13 @@ class BalloonAction:
 class BalloonGameState:
     mode: GameMode = GameMode.NORMAL_PLAY
     special_step: SpecialSequenceStep = SpecialSequenceStep.COMPLETE
+    # True once the four G precursors have armed the one-shot sequence.
     special_sequence_seen: bool = False
+    # After the B->R->Y->G precursor sequence completes, the next G-labelled
+    # target is the actual Super-G. Keep these states separate so a missed
+    # frame does not cause the precursor event to retrigger.
+    super_g_ready: bool = False
+    super_g_active: bool = False
     g_active: bool = False
     pending_twin_ids: tuple[int, int] | None = None
 
