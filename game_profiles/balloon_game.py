@@ -461,7 +461,11 @@ class BalloonGameProfile(GameProfile):
             )
             aspect_ok = (
                 self._CORE_MIN_ASPECT_RATIO <= aspect_ratio <= self._CORE_MAX_ASPECT_RATIO
-                or (touches_edge and circularity >= 0.55)
+                or (
+                    touches_edge
+                    and 0.45 <= aspect_ratio <= 1.45
+                    and circularity >= 0.55
+                )
             )
             if not (
                 self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
