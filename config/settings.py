@@ -13,6 +13,7 @@ class RunMode(Enum):
     BENCHMARK = "benchmark"
     DRY_RUN = "dry-run"
     LIVE = "live"
+    COLLECT = "collect"
 
 
 @dataclass
