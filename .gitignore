@@ -7,3 +7,6 @@ training/dataset/test/*/*
 !training/dataset/train/*/.gitkeep
 !training/dataset/val/*/.gitkeep
 !training/dataset/test/*/.gitkeep
+
+training/raw/*
+!training/raw/.gitkeep
