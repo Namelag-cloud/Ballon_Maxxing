@@ -160,14 +160,15 @@ class TestBalloonVision(unittest.TestCase):
         cv2.circle(frame, (200, 760), 25, (230, 230, 230), -1)
 
         profile = BalloonGameProfile()
-        detections = profile._detect_multicolor_special(profile._last_hsv_frame if profile._last_hsv_frame is not None else cv2.cvtColor(frame, cv2.COLOR_BGR2HSV), notification_count=2)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        detections = profile._detect_multicolor_special(hsv, notification_count=2)
         specials = [
             d for d in detections
-            if d["target_type"] == TargetType.MULTICOLOR_SPECIAL.value
+            if d.target_type == TargetType.MULTICOLOR_SPECIAL
         ]
         self.assertEqual(len(specials), 1)
-        self.assertIsNone(specials[0]["color_name"])
-        self.assertGreater(specials[0]["visual_features"]["multicolor_score"], 0.12)
+        self.assertIsNone(specials[0].color)
+        self.assertGreater(specials[0].visual_features.multicolor_score, 0.12)
 
 
 if __name__ == "__main__":
