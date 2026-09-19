@@ -637,6 +637,8 @@ class Application:
                     last_printed = secs
                 time.sleep(0.05)
             if not self._running:
+                if candidate_collector is not None:
+                    candidate_collector.close()
                 return
             print("GO — input is now ACTIVE\n")
             self._start_time = now_monotonic()
