@@ -487,8 +487,6 @@ class BalloonGameProfile(GameProfile):
             solidity = contour_area / hull_area if hull_area > 0 else 0.0
 
             boundary_radial_cv = self._boundary_radial_cv(contour)
-            if boundary_radial_cv > self._MAX_BOUNDARY_RADIAL_CV:
-                continue
 
             enclosed_hole_area = 0.0
             if hierarchy is not None:
@@ -527,6 +525,21 @@ class BalloonGameProfile(GameProfile):
 
             if circularity < self._CORE_MIN_CIRCULARITY:
                 continue
+
+            # Frame-clipped balloons necessarily have a less uniform radial
+            # boundary because the missing arc is replaced by the frame edge.
+            # Keep the strict radial gate for normal components, but allow the
+            # empirically observed clipped-circle geometry when the component
+            # still has circular contour evidence and non-solid fill.
+            if boundary_radial_cv > self._MAX_BOUNDARY_RADIAL_CV:
+                edge_clipped_circle = (
+                    touches_edge
+                    and fill_ratio <= 0.85
+                    and circularity >= 0.55
+                    and boundary_radial_cv <= 0.22
+                )
+                if not edge_clipped_circle:
+                    continue
 
             # Keep a small geometry sample for diagnosing false positives. This
             # records only components that reach the normal-balloon candidate
