@@ -64,31 +64,62 @@ class TestBalloonDecisionMechanics(unittest.TestCase):
         ])
         self.assertFalse(any(a.is_special_sequence for a in result.actions))
 
-    def test_special_detection_enters_strict_blue_step(self):
+    def test_partial_g_precursors_do_not_arm_sequence(self):
         detections = [
             detection(TargetType.NORMAL_BALLOON, BalloonColor.RED, (100, 100), target_id=1),
             detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (300, 100), target_id=2),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (900, 700), target_id=3),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (1500, 100), target_id=4),
+        ]
+        result = self.engine.decide(detections)
+
+        self.assertEqual(result.mode, GameMode.NORMAL_PLAY)
+        self.assertEqual(result.special_step, SpecialSequenceStep.COMPLETE)
+        self.assertFalse(self.engine.state.special_sequence_seen)
+        self.assertIsNone(result.g_action)
+
+    def test_all_four_g_precursors_arm_sequence_without_proximity(self):
+        detections = [
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (100, 100), target_id=10),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (900, 700), target_id=11),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.YELLOW, (1500, 120), target_id=12),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (300, 900), target_id=13),
         ]
         result = self.engine.decide(detections)
 
         self.assertEqual(result.mode, GameMode.SPECIAL_SEQUENCE)
         self.assertEqual(result.special_step, SpecialSequenceStep.BLUE)
         self.assertEqual(len(result.actions), 1)
-        self.assertEqual(result.actions[0].target_type, TargetType.SPECIAL_SEQUENCE_BALLOON)
         self.assertEqual(result.actions[0].color, BalloonColor.BLUE)
+        self.assertTrue(result.actions[0].metadata["g_precursor"])
+        self.assertIsNone(result.g_action)
 
     def test_special_sequence_ignores_ordinary_same_color_and_twins(self):
-        result = self.engine.decide([
+        self.engine.decide([
             detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (500, 100), target_id=10),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (900, 100), target_id=11),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.YELLOW, (1300, 100), target_id=12),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (1700, 100), target_id=13),
             detection(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (100, 100), target_id=1),
             detection(TargetType.TWIN_BALLOON, BalloonColor.BLUE, (200, 100), target_id=2),
             detection(TargetType.TWIN_BALLOON, BalloonColor.BLUE, (240, 100), target_id=3),
         ])
 
+        result = self.engine.decide([
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (500, 100), target_id=10),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (900, 100), target_id=11),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.YELLOW, (1300, 100), target_id=12),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (1700, 100), target_id=13),
+            detection(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (100, 100), target_id=1),
+            detection(TargetType.TWIN_BALLOON, BalloonColor.BLUE, (200, 100), target_id=2),
+            detection(TargetType.TWIN_BALLOON, BalloonColor.BLUE, (240, 100), target_id=3),
+        ])
         self.assertEqual(len(result.actions), 1)
         self.assertEqual(result.actions[0].target_id, 10)
+        self.assertTrue(result.actions[0].metadata["g_precursor"])
+        self.assertEqual(result.actions[0].color, BalloonColor.BLUE)
 
-        # A red special is visible early, but cannot advance the blue step.
+        # A red precursor is visible, but cannot advance the blue step.
         result = self.engine.decide([
             detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (500, 100), target_id=11),
         ])
@@ -96,6 +127,12 @@ class TestBalloonDecisionMechanics(unittest.TestCase):
         self.assertEqual(self.engine.state.special_step, SpecialSequenceStep.BLUE)
 
     def test_special_sequence_advances_only_on_completed_required_target(self):
+        self.engine.decide([
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (100, 100), target_id=90),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (900, 100), target_id=91),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.YELLOW, (1500, 100), target_id=92),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (300, 900), target_id=93),
+        ])
         blue = self.engine.decide([
             detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (500, 100), target_id=10),
         ]).actions[0]
@@ -122,7 +159,13 @@ class TestBalloonDecisionMechanics(unittest.TestCase):
         self.assertEqual(self.engine.state.special_step, SpecialSequenceStep.COMPLETE)
         self.assertTrue(self.engine.state.special_sequence_seen)
 
-    def test_completed_special_sequence_cannot_be_retriggered(self):
+    def test_completed_sequence_routes_g_label_to_super_g_once(self):
+        self.engine.decide([
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (100, 100), target_id=90),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.RED, (900, 100), target_id=91),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.YELLOW, (1500, 100), target_id=92),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (300, 900), target_id=93),
+        ])
         for color, target_id in [
             (BalloonColor.BLUE, 90),
             (BalloonColor.RED, 91),
@@ -130,26 +173,30 @@ class TestBalloonDecisionMechanics(unittest.TestCase):
             (BalloonColor.GREEN, 93),
         ]:
             action = self.engine.decide([
-                detection(
-                    TargetType.SPECIAL_SEQUENCE_BALLOON,
-                    color,
-                    (target_id, 100),
-                    target_id=target_id,
-                ),
+                detection(TargetType.SPECIAL_SEQUENCE_BALLOON, color, (target_id, 100), target_id=target_id),
             ]).actions[0]
             self.assertTrue(self.engine.complete_action(action))
 
-        self.assertEqual(self.engine.state.mode, GameMode.NORMAL_PLAY)
+        self.assertTrue(self.engine.state.super_g_ready)
         result = self.engine.decide([
-            detection(
-                TargetType.SPECIAL_SEQUENCE_BALLOON,
-                BalloonColor.BLUE,
-                (100, 200),
-                target_id=94,
-            ),
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (100, 200), target_id=94),
+            detection(TargetType.NORMAL_BALLOON, BalloonColor.GREEN, (500, 500), target_id=95),
         ])
         self.assertEqual(result.mode, GameMode.NORMAL_PLAY)
-        self.assertEqual(result.actions, ())
+        self.assertTrue(result.g_action.is_g)
+        self.assertTrue(result.g_action.metadata["super_g_active"])
+        self.assertFalse(self.engine.state.super_g_ready)
+        self.assertTrue(self.engine.state.super_g_active)
+        self.assertEqual([a.target_id for a in result.actions], [95])
+
+        # The active Super-G remains in the independent G lane and may be
+        # reacquired on a later observation with a new tracking id.
+        result = self.engine.decide([
+            detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.GREEN, (120, 220), target_id=96),
+        ])
+        self.assertIsNotNone(result.g_action)
+        self.assertTrue(result.g_action.metadata["super_g_active"])
+        self.assertTrue(self.engine.state.super_g_active)
 
     def test_twin_pair_is_one_coordinated_action_with_30ms_bound(self):
         result = self.engine.decide([
@@ -204,18 +251,15 @@ class TestBalloonDecisionMechanics(unittest.TestCase):
         self.assertIsNone(result.g_action)
 
     def test_g_is_concurrent_with_special_sequence(self):
+        # Legacy G-symbols are still independent from the precursor sequence.
         result = self.engine.decide([
             detection(TargetType.G_SYMBOL, None, (50, 200), target_id=70),
             detection(TargetType.SPECIAL_SEQUENCE_BALLOON, BalloonColor.BLUE, (500, 200), target_id=71),
-            detection(TargetType.NORMAL_BALLOON, BalloonColor.BLUE, (700, 200), target_id=72),
         ])
-
-        self.assertEqual(result.mode, GameMode.SPECIAL_SEQUENCE)
-        # Super-G is exclusive while the ordered sequence is active; the
-        # G-symbol lane must not interleave with the required node.
-        self.assertIsNone(result.g_action)
-        self.assertEqual(len(result.actions), 1)
-        self.assertEqual(result.actions[0].target_id, 71)
+        self.assertEqual(result.mode, GameMode.NORMAL_PLAY)
+        self.assertIsNotNone(result.g_action)
+        self.assertEqual(result.g_action.target_type, TargetType.G_SYMBOL)
+        self.assertFalse(self.engine.state.special_sequence_seen)
 
     def test_multicolor_special_is_preserved_but_has_no_invented_priority(self):
         result = self.engine.decide([
