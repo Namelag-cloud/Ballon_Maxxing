@@ -424,7 +424,6 @@ class Application:
 
                 frame, capture_ts = self._capture.grab()
                 detections, tracks, actions, game_actions = self._process_frame(frame)
-                decision_ready_ts = now_monotonic()
 
                 self._frame_count += 1
                 self._fps_frame_count += 1
@@ -538,6 +537,7 @@ class Application:
 
                 frame, capture_ts = self._capture.grab()
                 detections, tracks, actions, game_actions = self._process_frame(frame)
+                decision_ready_ts = now_monotonic()
 
                 self._frame_count += 1
                 self._fps_frame_count += 1
