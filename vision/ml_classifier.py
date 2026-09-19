@@ -29,7 +29,6 @@ class MLVisionClassifier:
         threshold: float = DEFAULT_THRESHOLD,
     ) -> None:
         import torch
-        from torchvision import transforms
         from training.train_classifier import IMAGE_SIZE as TRAIN_IMAGE_SIZE
         from training.train_classifier import make_model
 
@@ -71,21 +70,19 @@ class MLVisionClassifier:
             "total_ms": 0.0,
         }
 
-        self._transform = transforms.Compose(
-            [
-                transforms.ToPILImage(),
-                transforms.Resize((self._image_size, self._image_size)),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225],
-                ),
-            ]
-        )
+        # Runtime preprocessing intentionally stays NumPy/OpenCV based.
+        # The training pipeline may use torchvision, but PIL transforms add
+        # avoidable per-candidate overhead on the click-critical path.
+        self._mean = np.asarray([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
+        self._std = np.asarray([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
 
     @property
     def model(self) -> Any:
         return self._model
+
+    @property
+    def last_stats(self) -> dict:
+        return dict(self._last_stats)
 
     def classify_detections(
         self,
@@ -135,8 +132,16 @@ class MLVisionClassifier:
             if crop.size == 0:
                 continue
 
-            rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-            tensors.append(self._transform(rgb))
+            resized = cv2.resize(
+                crop,
+                (self._image_size, self._image_size),
+                interpolation=cv2.INTER_AREA,
+            )
+            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            array = np.ascontiguousarray(rgb.transpose(2, 0, 1), dtype=np.float32)
+            array *= (1.0 / 255.0)
+            array = (array - self._mean) / self._std
+            tensors.append(self._torch.from_numpy(array))
             prepared.append((detection, (x0, y0, x1 - x0, y1 - y0)))
 
         self._last_stats["preprocess_ms"] = (time.perf_counter() - preprocess_started) * 1000.0
