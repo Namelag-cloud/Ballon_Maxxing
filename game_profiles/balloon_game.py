@@ -58,7 +58,7 @@ class BalloonGameProfile(GameProfile):
     _TWIN_WHITE_BORDER_RATIO = 0.10
     _SPECIAL_RELATIVE_DIAMETER = 0.82
     _TWIN_RING_INNER_SCALE = 1.05
-    _TWIN_RING_OUTER_SCALE = 1.75
+    _TWIN_RING_OUTER_SCALE = 2.00
     _TWIN_RING_MIN_COLOR_RATIO = 0.025
     _TWIN_RING_MIN_SECTOR_COVERAGE = 0.18
     _TWIN_TEXT_MIN_SCORE = 0.08
@@ -1024,15 +1024,15 @@ class BalloonGameProfile(GameProfile):
                 used.update({i, j})
                 break
 
-        pair_ids: dict[int, str] = {}
+        pair_ids: dict[tuple[float, float], str] = {}
         for first, second in pairs:
             ordered = sorted((first.center, second.center))
             pair_id = (
                 f"golden_duo:{ordered[0][0]}:{ordered[0][1]}:"
                 f"{ordered[1][0]}:{ordered[1][1]}"
             )
-            pair_ids[id(first)] = pair_id
-            pair_ids[id(second)] = pair_id
+            pair_ids[tuple(map(float, first.center))] = pair_id
+            pair_ids[tuple(map(float, second.center))] = pair_id
 
         self._duo_pairs = [
             {
@@ -1044,7 +1044,7 @@ class BalloonGameProfile(GameProfile):
 
         result: list[TargetDetection] = []
         for detection in detections:
-            pair_id = pair_ids.get(id(detection))
+            pair_id = pair_ids.get(tuple(map(float, detection.center)))
             if pair_id is None:
                 result.append(detection)
                 continue
