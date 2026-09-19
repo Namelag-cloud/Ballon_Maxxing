@@ -54,29 +54,32 @@ class TestBalloonVision(unittest.TestCase):
 
     def test_special_ring_is_not_color_priority(self):
         frame = np.full((900, 900, 3), 30, dtype=np.uint8)
-        self._balloon(frame, (220, 250), 80, "red")
-        self._balloon(frame, (470, 250), 80, "yellow")
-        self._balloon(frame, (700, 250), 82, "blue", ring=True, ring_radius=150)
+        self._balloon(frame, (180, 250), 70, "blue", ring=True, ring_radius=90)
+        self._balloon(frame, (400, 250), 70, "red", ring=True, ring_radius=90)
+        self._balloon(frame, (620, 250), 70, "yellow", ring=True, ring_radius=90)
+        self._balloon(frame, (800, 250), 70, "green", ring=True, ring_radius=90)
 
         detections = BalloonGameProfile().detect(frame)
         special = [d for d in detections if d["target_type"] == TargetType.SPECIAL_SEQUENCE_BALLOON.value]
-        self.assertEqual(len(special), 1)
-        self.assertEqual(special[0]["color_name"], "blue")
-        self.assertTrue(special[0]["visual_features"]["ring_detected"])
-        self.assertGreater(special[0]["visual_features"]["ring_radius_ratio"], 1.4)
+        self.assertEqual(len(special), 4)
+        self.assertEqual({d["color_name"] for d in special}, {"blue", "red", "yellow", "green"})
+        self.assertTrue(all(d["visual_features"]["ring_detected"] for d in special))
+        self.assertTrue(all(d["metadata"]["semantic_class"] == "super_g_node" for d in special))
 
     def test_small_ringed_yellow_is_twin(self):
         frame = np.full((900, 900, 3), 30, dtype=np.uint8)
         self._balloon(frame, (180, 250), 80, "blue")
         self._balloon(frame, (400, 250), 80, "red")
         self._balloon(frame, (620, 250), 80, "yellow")
-        self._balloon(frame, (790, 650), 52, "yellow", ring=True, ring_radius=95)
+        self._balloon(frame, (700, 650), 25, "yellow", ring=True, ring_radius=46)
+        self._balloon(frame, (840, 650), 25, "yellow", ring=True, ring_radius=46)
 
         detections = BalloonGameProfile().detect(frame)
         twins = [d for d in detections if d["target_type"] == TargetType.TWIN_BALLOON.value]
-        self.assertEqual(len(twins), 1)
-        self.assertEqual(twins[0]["color_name"], "yellow")
-        self.assertTrue(twins[0]["is_twin"])
+        self.assertEqual(len(twins), 2)
+        self.assertEqual({d["color_name"] for d in twins}, {"yellow"})
+        self.assertTrue(all(d["is_twin"] for d in twins))
+        self.assertEqual(len({d["metadata"]["semantic_pair_id"] for d in twins}), 1)
 
     def test_solid_edge_ui_components_are_not_balloon_targets(self):
         frame = np.full((900, 900, 3), 30, dtype=np.uint8)
@@ -126,7 +129,7 @@ class TestBalloonVision(unittest.TestCase):
 
     def test_multicolor_special_has_own_class(self):
         frame = np.full((900, 900, 3), 30, dtype=np.uint8)
-        cx, cy, radius = 450, 450, 105
+        cx, cy, radius = 450, 450, 45
         star = np.array(
             [
                 (cx, cy - radius),
@@ -153,13 +156,16 @@ class TestBalloonVision(unittest.TestCase):
         for q, color in palette.items():
             frame[(mask > 0) & (quadrant == q)] = color
 
+        cv2.circle(frame, (120, 760), 25, (230, 230, 230), -1)
+        cv2.circle(frame, (200, 760), 25, (230, 230, 230), -1)
+
         detections = BalloonGameProfile().detect(frame)
         specials = [
             d for d in detections
             if d["target_type"] == TargetType.MULTICOLOR_SPECIAL.value
         ]
         self.assertEqual(len(specials), 1)
-        self.assertEqual(specials[0]["color_name"], "blue")
+        self.assertIsNone(specials[0]["color_name"])
         self.assertGreater(specials[0]["visual_features"]["multicolor_score"], 0.12)
 
 

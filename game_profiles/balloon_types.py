@@ -71,6 +71,7 @@ class TargetDetection:
     is_twin: bool = False
     is_special_sequence: bool = False
     visual_features: VisualFeatures = field(default_factory=VisualFeatures)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -85,6 +86,7 @@ class TargetDetection:
             "outline_white_ratio": self.visual_features.white_border_ratio,
             "outline_contrast": self.visual_features.outline_contrast,
             "visual_features": self.visual_features.as_dict(),
+            "metadata": dict(self.metadata),
         }
 
 

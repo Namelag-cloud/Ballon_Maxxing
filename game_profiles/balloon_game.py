@@ -47,6 +47,24 @@ class BalloonGameProfile(GameProfile):
     _TWIN_WHITE_BORDER_RATIO = 0.10
     _SPECIAL_RELATIVE_DIAMETER = 0.82
 
+    # Ground-truth engine invariants. These are deliberately kept separate from
+    # pixel thresholds so future renderer-specific calibration does not weaken
+    # the semantic contract.
+    _SUPER_G_COLORS = (
+        BalloonColor.BLUE,
+        BalloonColor.RED,
+        BalloonColor.YELLOW,
+        BalloonColor.GREEN,
+    )
+    _SUPER_G_MATCH_DISTANCE_PX = 32.0
+    _SUPER_G_CONFIRM_FRAMES = 1
+    _GOLDEN_DUO_MIN_DISTANCE_PX = 50.0
+    _GOLDEN_DUO_MAX_DIAMETER_PX = 66.0
+    _GOLDEN_DUO_MAX_CENTER_DRIFT_PX = 32.0
+    _GOLDEN_DUO_MAX_MISSING_FRAMES = 5
+    _GEMINI_MIN_DIAMETER_PX = 60.0
+    _GEMINI_MAX_DIAMETER_PX = 150.0
+
     def __init__(self) -> None:
         self._settings = load_settings()
         self._classifier = ColorClassifier(self._settings)
@@ -61,6 +79,13 @@ class BalloonGameProfile(GameProfile):
             ),
         )
         self._last_profile = self._empty_profile()
+        self._semantic_frame = 0
+        self._candidate_history: list[dict] = []
+        self._super_group: dict[str, tuple[float, float]] | None = None
+        self._super_group_last_seen: dict[str, int] = {}
+        self._super_group_age = 0
+        self._super_g_terminal = False
+        self._duo_pairs: list[dict] = []
 
     @staticmethod
     def _empty_profile() -> dict:
@@ -115,6 +140,15 @@ class BalloonGameProfile(GameProfile):
             "candidate_counts": {"blue": 0, "red": 0, "yellow": 0, "green": 0},
             "candidate_geometry": [],
             "ring_circles_returned": 0,
+            "notification_ms": 0.0,
+            "notification_count": 0,
+            "semantic": {
+                "super_g_confirmed": False,
+                "super_g_member_ids": [],
+                "golden_duo_pairs": [],
+                "gemini_candidates": 0,
+                "ring_candidates_considered": 0,
+            },
         }
 
     @property
@@ -147,111 +181,100 @@ class BalloonGameProfile(GameProfile):
                 self._detect_color_components(hsv, color_name)
             )
 
+        notification_t0 = time.perf_counter()
+        notifications = self._detect_notifications(hsv)
+        candidates.extend(notifications)
+        notification_count = len(notifications)
+        self._last_profile["notification_ms"] = (
+            time.perf_counter() - notification_t0
+        ) * 1000.0
+        self._last_profile["notification_count"] = notification_count
+
         multicolor_t0 = time.perf_counter()
-        candidates.extend(self._detect_multicolor_special(hsv))
+        candidates.extend(
+            self._detect_multicolor_special(
+                hsv,
+                notification_count=notification_count,
+            )
+        )
         self._last_profile["multicolor_ms"] = (time.perf_counter() - multicolor_t0) * 1000.0
 
         g_t0 = time.perf_counter()
-        candidates.extend(self._g_detector.detect(hsv))
+        g_detections = self._g_detector.detect(hsv)
         self._last_profile["g_detector_ms"] = (time.perf_counter() - g_t0) * 1000.0
 
-        classification_t0 = time.perf_counter()
-        balloon_diameters = [
-            max(d.width, d.height)
-            for d in candidates
-            if d.target_type == TargetType.NORMAL_BALLOON
-            and d.color is not None
+        # G is a more specific multicolor geometry class. Do not let the generic
+        # Gemini candidate shadow the same image region when both detectors fire.
+        g_boxes = [d.bbox for d in g_detections]
+        candidates = [
+            d for d in candidates
+            if d.target_type != TargetType.MULTICOLOR_SPECIAL
+            or not any(self._bbox_iou(d.bbox, box) > 0.40 for box in g_boxes)
         ]
-        reference_diameter = (
-            float(np.percentile(balloon_diameters, 75))
-            if balloon_diameters
-            else 0.0
-        )
-        self._last_profile["classification_ms"] += (
-            time.perf_counter() - classification_t0
-        ) * 1000.0
+        candidates.extend(g_detections)
 
-        self._last_profile["normal_candidate_count"] = len(balloon_diameters)
+        classification_t0 = time.perf_counter()
+        normal_candidates = [
+            d for d in candidates
+            if d.target_type == TargetType.NORMAL_BALLOON and d.color is not None
+        ]
+        self._last_profile["normal_candidate_count"] = len(normal_candidates)
+
+        # Expensive ring/Hough work is now reserved for a very small set of
+        # newly-arrived, one-per-color candidates that could form the game's
+        # single four-node Super-G. Ordinary balloons no longer pay this cost.
+        super_group = self._detect_super_g_group(normal_candidates, bgr_frame)
+        if super_group is not None:
+            self._last_profile["semantic"]["super_g_confirmed"] = True
+            self._last_profile["semantic"]["super_g_member_ids"] = [
+                d.center for d in super_group
+            ]
+            confirmed_by_center = {d.center: d for d in super_group}
+            normal_candidates = [
+                confirmed_by_center.get(d.center, d)
+                for d in normal_candidates
+            ]
 
         classified: list[TargetDetection] = []
         for detection in candidates:
-            classification_t0 = time.perf_counter()
-            if detection.target_type == TargetType.NORMAL_BALLOON and detection.color:
-                features = detection.visual_features
-                classification_ms_before_ring = (time.perf_counter() - classification_t0) * 1000.0
-                self._last_profile["classification_ms"] += classification_ms_before_ring
+            if detection.target_type != TargetType.NORMAL_BALLOON or detection.color is None:
+                classified.append(detection)
+                continue
 
-                ring = self._ring.detect(bgr_frame, detection.bbox)
-                ring_profile = self._ring.last_profile
-                self._last_profile["ring_total_ms"] += float(ring_profile["total_ms"])
-                self._last_profile["ring_hough_ms"] += float(ring_profile["hough_ms"])
-                self._last_profile["ring_grayscale_ms"] += float(ring_profile["grayscale_ms"])
-                self._last_profile["ring_blur_ms"] += float(ring_profile["blur_ms"])
-                self._last_profile["ring_canny_ms"] += float(ring_profile["canny_ms"])
-                self._last_profile["ring_scoring_ms"] += float(ring_profile["scoring_ms"])
-                self._last_profile["ring_call_count"] += 1
-                self._last_profile["hough_call_count"] += int(ring_profile["hough_called"])
-                self._last_profile["ring_circles_returned"] += int(ring_profile["circles_returned"])
-
-                classification_t0 = time.perf_counter()
-                features = replace(
-                    features,
-                    ring_detected=ring.detected,
-                    ring_radius_ratio=ring.radius_ratio,
-                    ring_confidence=ring.confidence,
-                )
-
-                diameter = max(detection.width, detection.height)
-                relative_to_reference = (
-                    diameter / reference_diameter if reference_diameter > 0 else 0.0
-                )
-
-                is_large_ring_target = (
-                    ring.detected
-                    and ring.radius_ratio >= 1.25
-                    and relative_to_reference >= self._SPECIAL_RELATIVE_DIAMETER
-                )
-
-                is_twin = (
-                    ring.detected
-                    and detection.color in (BalloonColor.YELLOW, BalloonColor.GREEN)
-                    and not is_large_ring_target
-                    and (
-                        features.white_border_ratio >= self._TWIN_WHITE_BORDER_RATIO
-                        or relative_to_reference < self._SPECIAL_RELATIVE_DIAMETER
-                    )
-                )
-
-                if is_large_ring_target:
-                    target_type = TargetType.SPECIAL_SEQUENCE_BALLOON
-                    is_twin = False
-                    is_special = True
-                elif is_twin:
-                    target_type = TargetType.TWIN_BALLOON
-                    is_special = False
-                else:
-                    target_type = TargetType.NORMAL_BALLOON
-                    is_special = False
-
+            metadata = dict(detection.metadata)
+            confirmed = next(
+                (d for d in super_group or [] if d.center == detection.center),
+                None,
+            )
+            if confirmed is not None or self._super_group_matches(detection):
+                if confirmed is not None:
+                    detection = confirmed
                 detection = replace(
                     detection,
-                    target_type=target_type,
-                    is_twin=is_twin,
-                    is_special_sequence=is_special,
-                    visual_features=features,
+                    target_type=TargetType.SPECIAL_SEQUENCE_BALLOON,
+                    is_special_sequence=True,
+                    metadata={
+                        **metadata,
+                        "semantic_class": "super_g_node",
+                        "semantic_group": "super_g",
+                        "semantic_confirmed": True,
+                    },
                 )
-
-                self._last_profile["classification_ms"] += (
-                    time.perf_counter() - classification_t0
-                ) * 1000.0
-
-            else:
-                self._last_profile["classification_ms"] += (
-                    time.perf_counter() - classification_t0
-                ) * 1000.0
-
             classified.append(detection)
 
+        # Golden Duo is a two-object semantic class. A single yellow/green
+        # balloon can never become a twin solely because it has an outline.
+        classified = self._classify_golden_duos(classified, bgr_frame)
+
+        # Gemini is one larger multicolor object. The engine only permits one
+        # active Gemini and requires at least two notifications when it spawns;
+        # the visual detector already applies the notification constraint.
+        self._last_profile["semantic"]["golden_duo_pairs"] = [
+            pair["pair_id"] for pair in self._duo_pairs
+        ]
+
+        self._maintain_super_group(classified)
+        self._update_candidate_history(classified)
         assembly_t0 = time.perf_counter()
         classified.sort(key=lambda d: (d.center[1], d.center[0], d.target_type.value))
         result = [d.as_dict() for d in classified]
@@ -300,7 +323,10 @@ class BalloonGameProfile(GameProfile):
         now = time.perf_counter_ns() / 1e9
         actions: list[GameAction] = []
         for det in detections:
-            if det.get("target_type") == TargetType.INVALID_WHITE.value:
+            if det.get("target_type") in {
+                TargetType.INVALID_WHITE.value,
+                TargetType.NOTIFICATION.value,
+            }:
                 continue
             color = det.get("color_name") or "unknown"
             actions.append(
@@ -327,7 +353,13 @@ class BalloonGameProfile(GameProfile):
         pass
 
     def reset(self) -> None:
-        pass
+        self._semantic_frame = 0
+        self._candidate_history = []
+        self._super_group = None
+        self._super_group_last_seen = {}
+        self._super_group_age = 0
+        self._super_g_terminal = False
+        self._duo_pairs = []
 
     def _detect_color_components(
         self,
@@ -426,10 +458,25 @@ class BalloonGameProfile(GameProfile):
 
             fill_ratio = float(area) / float(w * h)
             aspect_ratio = float(w) / float(h)
+            touches_edge = (
+                x == 0
+                or y == 0
+                or x + w >= hsv.shape[1]
+                or y + h >= hsv.shape[0]
+            )
+            aspect_ok = (
+                self._CORE_MIN_ASPECT_RATIO <= aspect_ratio <= self._CORE_MAX_ASPECT_RATIO
+                or (
+                    touches_edge
+                    and 0.45 <= aspect_ratio <= 2.0
+                    and circularity >= 0.55
+                    and fill_ratio <= 0.80
+                )
+            )
             if not (
                 self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
                 and circularity >= self._CORE_MIN_CIRCULARITY
-                and self._CORE_MIN_ASPECT_RATIO <= aspect_ratio <= self._CORE_MAX_ASPECT_RATIO
+                and aspect_ok
             ):
                 continue
 
@@ -491,8 +538,88 @@ class BalloonGameProfile(GameProfile):
         self._last_profile["candidate_counts"][color_name] = len(detections)
         return detections
 
-    def _detect_multicolor_special(self, hsv: np.ndarray) -> list[TargetDetection]:
-        """Detect the blue-dominant four-point multicolor symbol from the video."""
+    def _detect_notifications(self, hsv: np.ndarray) -> list[TargetDetection]:
+        """Detect source-defined white notification balloons.
+
+        Notifications are pure white game objects, so they are not represented
+        by the four saturated color masks used for normal balloons. Keeping them
+        as a separate, non-actionable detection also gives Gemini its observable
+        spawn precondition without permitting notification clicks.
+        """
+        if "white" not in self._settings.colors:
+            return []
+
+        mask = self._classifier.make_color_mask(hsv, "white")
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._kernel, iterations=1)
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        detections: list[TargetDetection] = []
+
+        for label in range(1, count):
+            x, y, w, h, area = [int(v) for v in stats[label]]
+            if area < self._settings.detection.min_area or area > self._settings.detection.max_area:
+                continue
+            if w <= 0 or h <= 0:
+                continue
+
+            fill_ratio = float(area) / float(w * h)
+            aspect = float(w) / float(h)
+            if not (0.45 <= fill_ratio <= 0.95 and 0.65 <= aspect <= 1.35):
+                continue
+
+            component_mask = np.zeros((h, w), dtype=np.uint8)
+            component_mask[labels[y:y + h, x:x + w] == label] = 255
+            contours, _ = cv2.findContours(
+                component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            if not contours:
+                continue
+            contour = max(contours, key=cv2.contourArea)
+            perimeter = cv2.arcLength(contour, True)
+            contour_area = cv2.contourArea(contour)
+            circularity = (
+                4.0 * np.pi * contour_area / (perimeter * perimeter)
+                if perimeter > 0 else 0.0
+            )
+            if circularity < 0.45:
+                continue
+
+            detections.append(
+                TargetDetection(
+                    target_type=TargetType.NOTIFICATION,
+                    color=None,
+                    center=(x + w // 2, y + h // 2),
+                    bbox=(x, y, w, h),
+                    area=area,
+                    confidence=1.0,
+                    width=float(w),
+                    height=float(h),
+                    visual_features=VisualFeatures(
+                        circularity=float(circularity),
+                        solidity=1.0,
+                    ),
+                    metadata={
+                        "semantic_class": "notification",
+                        "semantic_confirmed": True,
+                    },
+                )
+            )
+        return detections
+
+    def _detect_multicolor_special(
+        self,
+        hsv: np.ndarray,
+        *,
+        notification_count: int = 0,
+    ) -> list[TargetDetection]:
+        """Detect Gemini using source-grounded size/context constraints.
+
+        The renderer is not available in this chunk, so this method deliberately
+        does not invent a renderer-specific pixel signature. It requires the
+        engine's observable spawn precondition (>=2 notifications) and returns
+        at most one suitably sized multicolor object.
+        """
+        if notification_count < 2:
+            return []
         colorful = cv2.inRange(
             hsv,
             np.array([0, 60, 80], dtype=np.uint8),
@@ -510,10 +637,14 @@ class BalloonGameProfile(GameProfile):
                 continue
 
             fill_ratio = float(area) / float(w * h)
-            if not (0.30 <= fill_ratio <= 0.65):
+            if fill_ratio < 0.25:
                 continue
             aspect = float(w) / float(h)
-            if not (0.70 <= aspect <= 1.30):
+            if not (0.55 <= aspect <= 1.45):
+                continue
+
+            diameter = max(w, h)
+            if not (self._GEMINI_MIN_DIAMETER_PX <= diameter <= self._GEMINI_MAX_DIAMETER_PX):
                 continue
 
             component_mask = np.zeros(colorful.shape, dtype=np.uint8)
@@ -533,7 +664,7 @@ class BalloonGameProfile(GameProfile):
             )
             hull_area = cv2.contourArea(cv2.convexHull(contour))
             solidity = contour_area / hull_area if hull_area > 0 else 0.0
-            if not (0.20 <= circularity <= 0.60 and 0.45 <= solidity <= 0.85):
+            if circularity < 0.20 or solidity < 0.25:
                 continue
 
             multicolor_score = self._multicolor_score(hsv[y:y + h, x:x + w])
@@ -543,7 +674,7 @@ class BalloonGameProfile(GameProfile):
             detections.append(
                 TargetDetection(
                     target_type=TargetType.MULTICOLOR_SPECIAL,
-                    color=BalloonColor.BLUE,
+                    color=None,
                     center=(x + w // 2, y + h // 2),
                     bbox=(x, y, w, h),
                     area=area,
@@ -555,10 +686,262 @@ class BalloonGameProfile(GameProfile):
                         solidity=float(solidity),
                         multicolor_score=float(multicolor_score),
                     ),
+                    metadata={
+                        "semantic_class": "gemini",
+                        "semantic_confirmed": True,
+                        "notification_count": notification_count,
+                    },
                 )
             )
 
-        return detections
+        # The engine guarantees at most one active Gemini. If visual segmentation
+        # produces several multicolor components, retain only the strongest/largest
+        # plausible candidate rather than emitting multiple Geminis.
+        detections.sort(
+            key=lambda d: (max(d.width, d.height), d.confidence),
+            reverse=True,
+        )
+        return detections[:1]
+
+    def _detect_super_g_group(
+        self,
+        candidates: list[TargetDetection],
+        bgr_frame: np.ndarray,
+    ) -> list[TargetDetection] | None:
+        """Confirm the engine's one four-node Super-G cohort.
+
+        The engine creates exactly one blue/red/yellow/green node set at once.
+        Because spawnTick is not visible to a screen-only bot, a new-per-color
+        cohort is the observable temporal proxy. The expensive ring detector is
+        then applied only to those four candidates, rather than every ordinary
+        balloon.
+        """
+        if self._super_group is not None or self._super_g_terminal:
+            return None
+
+        color_values = {c.value for c in self._SUPER_G_COLORS}
+        new_by_color: dict[str, TargetDetection] = {}
+        new_candidates: list[TargetDetection] = []
+        for candidate in candidates:
+            if not self._is_new_candidate(candidate):
+                continue
+            color = candidate.color.value
+            if color not in color_values:
+                continue
+            new_candidates.append(candidate)
+            if color in new_by_color:
+                continue
+            new_by_color[color] = candidate
+
+        if len(new_candidates) != len(color_values) or set(new_by_color) != color_values:
+            return None
+
+        confirmed: list[TargetDetection] = []
+        for candidate in new_by_color.values():
+            self._last_profile["semantic"]["ring_candidates_considered"] += 1
+            ring = self._ring.detect(bgr_frame, candidate.bbox)
+            self._record_ring_profile(ring)
+            if not ring.detected:
+                return None
+
+            confirmed.append(
+                replace(
+                    candidate,
+                    visual_features=replace(
+                        candidate.visual_features,
+                        ring_detected=True,
+                        ring_radius_ratio=ring.radius_ratio,
+                        ring_confidence=ring.confidence,
+                    ),
+                )
+            )
+
+        self._super_group = {
+            detection.color.value: tuple(map(float, detection.center))
+            for detection in confirmed
+            if detection.color is not None
+        }
+        self._super_group_last_seen = {
+            detection.color.value: self._semantic_frame
+            for detection in confirmed
+            if detection.color is not None
+        }
+        self._super_group_age = 0
+        return confirmed
+
+    def _record_ring_profile(self, ring) -> None:
+        ring_profile = self._ring.last_profile
+        self._last_profile["ring_total_ms"] += float(ring_profile["total_ms"])
+        self._last_profile["ring_hough_ms"] += float(ring_profile["hough_ms"])
+        self._last_profile["ring_grayscale_ms"] += float(ring_profile["grayscale_ms"])
+        self._last_profile["ring_blur_ms"] += float(ring_profile["blur_ms"])
+        self._last_profile["ring_canny_ms"] += float(ring_profile["canny_ms"])
+        self._last_profile["ring_scoring_ms"] += float(ring_profile["scoring_ms"])
+        self._last_profile["ring_call_count"] += 1
+        self._last_profile["hough_call_count"] += int(ring_profile["hough_called"])
+        self._last_profile["ring_circles_returned"] += int(ring_profile["circles_returned"])
+
+    def _super_group_matches(self, detection: TargetDetection) -> bool:
+        if self._super_group is None or detection.color is None:
+            return False
+        previous = self._super_group.get(detection.color.value)
+        if previous is None:
+            return False
+        dx = float(detection.center[0]) - previous[0]
+        dy = float(detection.center[1]) - previous[1]
+        if (dx * dx + dy * dy) ** 0.5 <= self._SUPER_G_MATCH_DISTANCE_PX:
+            self._super_group[detection.color.value] = (
+                float(detection.center[0]),
+                float(detection.center[1]),
+            )
+            self._super_group_last_seen[detection.color.value] = self._semantic_frame
+            return True
+        return False
+
+    def _maintain_super_group(self, detections: list[TargetDetection]) -> None:
+        if self._super_group is None:
+            return
+        visible_colors = {
+            d.color.value
+            for d in detections
+            if d.target_type == TargetType.SPECIAL_SEQUENCE_BALLOON
+            and d.metadata.get("semantic_group") == "super_g"
+            and d.color is not None
+        }
+        if visible_colors:
+            self._super_group_age = 0
+            return
+
+        self._super_group_age += 1
+        if self._super_group_age < 8:
+            return
+
+        # Super-G is scheduled once per game. Once its four nodes have all been
+        # absent for a sustained interval, never manufacture a second group.
+        self._super_group = None
+        self._super_g_terminal = True
+
+    def _is_new_candidate(self, detection: TargetDetection) -> bool:
+        if detection.color is None:
+            return False
+        cx, cy = detection.center
+        threshold = max(
+            self._SUPER_G_MATCH_DISTANCE_PX,
+            max(detection.width, detection.height) * 0.65,
+        )
+        return not any(
+            item["color"] == detection.color.value
+            and ((cx - item["center"][0]) ** 2 + (cy - item["center"][1]) ** 2) ** 0.5 <= threshold
+            for item in self._candidate_history
+        )
+
+    def _classify_golden_duos(
+        self,
+        detections: list[TargetDetection],
+        bgr_frame: np.ndarray | None = None,
+    ) -> list[TargetDetection]:
+        """Classify Golden Duo only when a complete visual pair is present.
+
+        The engine creates exactly two golden_duo objects, both radius 25 in
+        solo mode, and enforces at least 60 game units between their centers.
+        The screen-only approximation requires two same-color, small candidates
+        separated by the source-grounded minimum and, when the frame is available,
+        matching circular-outline evidence. A lone yellow/green balloon can never
+        become a twin.
+        """
+        candidates = [
+            d for d in detections
+            if d.target_type == TargetType.NORMAL_BALLOON
+            and d.color in (BalloonColor.YELLOW, BalloonColor.GREEN)
+            and max(d.width, d.height) <= self._GOLDEN_DUO_MAX_DIAMETER_PX
+        ]
+
+        pairs: list[tuple[TargetDetection, TargetDetection]] = []
+        used: set[int] = set()
+        for i, first in enumerate(candidates):
+            if i in used:
+                continue
+            for j in range(i + 1, len(candidates)):
+                if j in used:
+                    continue
+                second = candidates[j]
+                if first.color != second.color:
+                    continue
+                distance = float(
+                    np.hypot(
+                        first.center[0] - second.center[0],
+                        first.center[1] - second.center[1],
+                    )
+                )
+                if distance < self._GOLDEN_DUO_MIN_DISTANCE_PX:
+                    continue
+                if bgr_frame is not None:
+                    first_ring = self._ring.detect(bgr_frame, first.bbox)
+                    self._record_ring_profile(first_ring)
+                    second_ring = self._ring.detect(bgr_frame, second.bbox)
+                    self._record_ring_profile(second_ring)
+                    if not (first_ring.detected and second_ring.detected):
+                        continue
+                pairs.append((first, second))
+                used.update({i, j})
+                break
+
+        pair_ids: dict[int, str] = {}
+        for first, second in pairs:
+            ordered = sorted((first.center, second.center))
+            pair_id = (
+                f"golden_duo:{ordered[0][0]}:{ordered[0][1]}:"
+                f"{ordered[1][0]}:{ordered[1][1]}"
+            )
+            pair_ids[id(first)] = pair_id
+            pair_ids[id(second)] = pair_id
+
+        self._duo_pairs = [
+            {
+                "pair_id": pair_id,
+                "last_frame": self._semantic_frame,
+            }
+            for pair_id in set(pair_ids.values())
+        ]
+
+        result: list[TargetDetection] = []
+        for detection in detections:
+            pair_id = pair_ids.get(id(detection))
+            if pair_id is None:
+                result.append(detection)
+                continue
+            result.append(
+                replace(
+                    detection,
+                    target_type=TargetType.TWIN_BALLOON,
+                    is_twin=True,
+                    metadata={
+                        **detection.metadata,
+                        "semantic_class": "golden_duo",
+                        "semantic_pair_id": pair_id,
+                        "semantic_confirmed": True,
+                    },
+                )
+            )
+        return result
+
+    def _update_candidate_history(self, detections: list[TargetDetection]) -> None:
+        self._semantic_frame += 1
+        current = [
+            {
+                "color": d.color.value,
+                "center": tuple(map(float, d.center)),
+                "width": float(d.width),
+                "height": float(d.height),
+            }
+            for d in detections
+            if d.color is not None and d.target_type in {
+                TargetType.NORMAL_BALLOON,
+                TargetType.TWIN_BALLOON,
+                TargetType.SPECIAL_SEQUENCE_BALLOON,
+            }
+        ]
+        self._candidate_history = current
 
     def _visual_features(
         self,
