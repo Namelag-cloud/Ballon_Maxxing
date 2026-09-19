@@ -21,18 +21,24 @@ class TestLabelStore(unittest.TestCase):
         store = LabelStore(path)
         store.set("one.png", "balloon")
         store.set("two.png", "ui")
-        store.set("three.png", "skip")
+        store.set("three.png", "duo")
+        store.set("four.png", "super_g_ring")
+        store.set("five.png", "skip")
 
         resumed = LabelStore(path)
         self.assertEqual(resumed.get("one.png"), "balloon")
         self.assertEqual(resumed.get("two.png"), "ui")
-        self.assertEqual(resumed.get("three.png"), "skip")
+        self.assertEqual(resumed.get("three.png"), "duo")
+        self.assertEqual(resumed.get("four.png"), "super_g_ring")
+        self.assertEqual(resumed.get("five.png"), "skip")
         self.assertEqual(
             resumed.counts(),
             {
                 "balloon": 1,
                 "ui": 1,
                 "notification": 0,
+                "duo": 1,
+                "super_g_ring": 1,
                 "unknown": 0,
                 "skip": 1,
             },
