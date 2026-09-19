@@ -45,7 +45,14 @@ class BalloonGameProfile(GameProfile):
     # A true balloon has a fairly uniform radial boundary. This catches
     # rounded/irregular UI shapes that can otherwise pass bbox circularity.
     _MAX_BOUNDARY_RADIAL_CV = 0.10
-    _MIN_BOUNDARY_CONTRAST = 0.72
+    # The score counter is static in the game UI. Keep this as a very small
+    # geometry+position guard rather than OCR or a full-screen text detector.
+    # A real balloon is roughly square; the observed score glyph region is
+    # materially taller/narrower.
+    _SCORE_UI_REGION = (960, 220, 1120, 370)
+    _SCORE_UI_MAX_WIDTH = 90
+    _SCORE_UI_MIN_HEIGHT = 70
+    _SCORE_UI_MAX_ASPECT = 0.85
     _WHITE_CORE_RATIO = 0.50
     _WHITE_MIN_DIAMETER_RATIO = 0.05
     _TWIN_WHITE_BORDER_RATIO = 0.10
@@ -145,6 +152,7 @@ class BalloonGameProfile(GameProfile):
             "candidate_counts": {"blue": 0, "red": 0, "yellow": 0, "green": 0},
             "candidate_geometry": [],
             "ring_circles_returned": 0,
+            "score_ui_rejections": 0,
             "notification_ms": 0.0,
             "notification_count": 0,
             "semantic": {
@@ -438,14 +446,6 @@ class BalloonGameProfile(GameProfile):
             if boundary_radial_cv > self._MAX_BOUNDARY_RADIAL_CV:
                 continue
 
-            boundary_contrast = self._boundary_contrast_score(
-                hsv,
-                (x, y, w, h),
-                component_mask,
-            )
-            if boundary_contrast < self._MIN_BOUNDARY_CONTRAST:
-                continue
-
             enclosed_hole_area = 0.0
             if hierarchy is not None:
                 for contour_index, contour_info in enumerate(hierarchy[0]):
@@ -498,6 +498,16 @@ class BalloonGameProfile(GameProfile):
                     and fill_ratio <= 0.80
                 )
             )
+            if self._is_score_counter_candidate(
+                x=x,
+                y=y,
+                width=w,
+                height=h,
+                aspect_ratio=aspect_ratio,
+            ):
+                self._last_profile["score_ui_rejections"] += 1
+                continue
+
             if not (
                 self._CORE_FILL_MIN <= fill_ratio <= self._CORE_FILL_MAX
                 and circularity >= self._CORE_MIN_CIRCULARITY
@@ -520,8 +530,9 @@ class BalloonGameProfile(GameProfile):
                     "circularity": float(circularity),
                     "solidity": float(solidity),
                     "boundary_radial_cv": float(boundary_radial_cv),
-                    "boundary_contrast": float(boundary_contrast),
                     "hole_ratio": float(hole_ratio),
+                    "equivalent_diameter": float(2.0 * np.sqrt(area / np.pi)),
+                    "circle_bbox_fill": float(area / (np.pi * (min(w, h) / 2.0) ** 2)),
                 })
 
             classification_t0 = time.perf_counter()
@@ -1006,51 +1017,35 @@ class BalloonGameProfile(GameProfile):
             return float("inf")
         return float(np.std(radii) / mean_radius)
 
-    @staticmethod
-    def _boundary_contrast_score(
-        hsv: np.ndarray,
-        bbox: tuple[int, int, int, int],
-        component_mask: np.ndarray,
-    ) -> float:
-        """Measure contrast in the immediate pixel shell surrounding a component."""
-        x, y, w, h = bbox
-        if component_mask.size == 0 or w <= 0 or h <= 0:
-            return 0.0
+    @classmethod
+    def _is_score_counter_candidate(
+        cls,
+        *,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        aspect_ratio: float,
+    ) -> bool:
+        """Reject the known static score-counter glyph geometry cheaply.
 
-        pad = 2
-        x0 = max(0, x - pad)
-        y0 = max(0, y - pad)
-        x1 = min(hsv.shape[1], x + w + pad)
-        y1 = min(hsv.shape[0], y + h + pad)
-
-        region = hsv[y0:y1, x0:x1]
-        expanded_mask = np.zeros(region.shape[:2], dtype=np.uint8)
-        mx0 = x - x0
-        my0 = y - y0
-        expanded_mask[my0:my0 + h, mx0:mx0 + w] = component_mask
-
-        dilated = cv2.dilate(
-            expanded_mask,
-            np.ones((3, 3), dtype=np.uint8),
-            iterations=1,
+        This is deliberately conditional: only a narrow/tall component inside
+        the fixed UI area is rejected. A roughly circular balloon in the same
+        region remains eligible, including a balloon that spawns over the UI.
+        """
+        region_x0, region_y0, region_x1, region_y1 = cls._SCORE_UI_REGION
+        center_x = x + width / 2.0
+        center_y = y + height / 2.0
+        inside_region = (
+            region_x0 <= center_x <= region_x1
+            and region_y0 <= center_y <= region_y1
         )
-        shell = (dilated > 0) & (expanded_mask == 0)
-        if not np.any(shell):
-            return 0.0
-
-        outside = region[shell]
-        inside = region[expanded_mask > 0]
-        if outside.size == 0 or inside.size == 0:
-            return 0.0
-
-        # Balloons are saturated while their immediate background is usually
-        # light and low-saturation. Use robust pixel fractions so anti-aliased
-        # edges do not hinge the result on one sampled point.
-        outside_light = (outside[:, 1] <= 70) & (outside[:, 2] >= 160)
-        inside_colored = (inside[:, 1] >= 80) & (inside[:, 2] >= 80)
-        outside_ratio = float(np.mean(outside_light))
-        inside_ratio = float(np.mean(inside_colored))
-        return min(outside_ratio, inside_ratio)
+        return (
+            inside_region
+            and width <= cls._SCORE_UI_MAX_WIDTH
+            and height >= cls._SCORE_UI_MIN_HEIGHT
+            and aspect_ratio <= cls._SCORE_UI_MAX_ASPECT
+        )
 
     @staticmethod
     def _white_core_ratio(
