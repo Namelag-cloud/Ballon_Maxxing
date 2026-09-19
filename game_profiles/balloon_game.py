@@ -45,6 +45,7 @@ class BalloonGameProfile(GameProfile):
     # A true balloon has a fairly uniform radial boundary. This catches
     # rounded/irregular UI shapes that can otherwise pass bbox circularity.
     _MAX_BOUNDARY_RADIAL_CV = 0.10
+    _MIN_BOUNDARY_CONTRAST = 0.72
     _WHITE_CORE_RATIO = 0.50
     _WHITE_MIN_DIAMETER_RATIO = 0.05
     _TWIN_WHITE_BORDER_RATIO = 0.10
@@ -437,6 +438,14 @@ class BalloonGameProfile(GameProfile):
             if boundary_radial_cv > self._MAX_BOUNDARY_RADIAL_CV:
                 continue
 
+            boundary_contrast = self._boundary_contrast_score(
+                hsv,
+                (x, y, w, h),
+                component_mask,
+            )
+            if boundary_contrast < self._MIN_BOUNDARY_CONTRAST:
+                continue
+
             enclosed_hole_area = 0.0
             if hierarchy is not None:
                 for contour_index, contour_info in enumerate(hierarchy[0]):
@@ -511,6 +520,7 @@ class BalloonGameProfile(GameProfile):
                     "circularity": float(circularity),
                     "solidity": float(solidity),
                     "boundary_radial_cv": float(boundary_radial_cv),
+                    "boundary_contrast": float(boundary_contrast),
                     "hole_ratio": float(hole_ratio),
                 })
 
@@ -995,6 +1005,40 @@ class BalloonGameProfile(GameProfile):
         if mean_radius <= 0.0:
             return float("inf")
         return float(np.std(radii) / mean_radius)
+
+    @staticmethod
+    def _boundary_contrast_score(
+        hsv: np.ndarray,
+        bbox: tuple[int, int, int, int],
+        component_mask: np.ndarray,
+    ) -> float:
+        """Measure how consistently a colored component borders a light, low-saturation background."""
+        x, y, w, h = bbox
+        if component_mask.size == 0 or w <= 0 or h <= 0:
+            return 0.0
+
+        dilated = cv2.dilate(component_mask, np.ones((3, 3), dtype=np.uint8), iterations=1)
+        shell = (dilated > 0) & (component_mask == 0)
+        if not np.any(shell):
+            return 0.0
+
+        region = hsv[y:y + h, x:x + w]
+        if region.shape[:2] != component_mask.shape:
+            return 0.0
+
+        outside = region[shell]
+        inside = region[component_mask > 0]
+        if outside.size == 0 or inside.size == 0:
+            return 0.0
+
+        # Balloons are saturated while their immediate background is usually
+        # light and low-saturation. Use robust medians rather than a single
+        # pixel so anti-aliased edges do not decide the result.
+        outside_light = (outside[:, 1] <= 70) & (outside[:, 2] >= 160)
+        inside_colored = (inside[:, 1] >= 80) & (inside[:, 2] >= 80)
+        outside_ratio = float(np.mean(outside_light))
+        inside_ratio = float(np.mean(inside_colored))
+        return min(outside_ratio, inside_ratio)
 
     @staticmethod
     def _white_core_ratio(
