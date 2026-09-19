@@ -464,7 +464,7 @@ class BalloonGameProfile(GameProfile):
                 or (
                     touches_edge
                     and 0.45 <= aspect_ratio <= 1.45
-                    and circularity >= 0.45
+                    and circularity >= 0.30
                 )
             )
             if not (
