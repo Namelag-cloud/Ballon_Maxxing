@@ -61,6 +61,8 @@ class MLBalloonGameProfile(BalloonGameProfile):
             bgr_frame,
             semantic_candidates,
         )
+        self._last_profile["ml"] = dict(self._ml_classifier._last_stats)
+        self._last_profile["ml_candidate_count"] = len(semantic_candidates)
 
         result: list[dict] = []
         for detection in classified:
