@@ -301,6 +301,20 @@ class Application:
             t0 = now_monotonic()
             detections = self._game_profile.detect(frame)
             vision_ms = (now_monotonic() - t0) * 1000.0
+            profile = (
+                self._game_profile.last_profile
+                if self._game_profile.game_type == GameType.BALLOON_GAME
+                else {}
+            )
+            ml_stats = dict(profile.get("ml") or {})
+            self._last_frame_stage_timings.update({
+                "vision_ms": vision_ms,
+                "spatial_ms": float(profile.get("spatial_total_ms", 0.0)),
+                "semantic_ms": float(profile.get("semantic_total_ms", profile.get("ml_semantic_total_ms", 0.0))),
+                "ml_preprocess_ms": float(ml_stats.get("preprocess_ms", 0.0)),
+                "ml_inference_ms": float(ml_stats.get("inference_ms", 0.0)),
+                "ml_total_ms": float(ml_stats.get("total_ms", 0.0)),
+            })
             if self._balloon_decision is not None:
                 t0 = now_monotonic()
                 tracking_detections = self._game_profile.to_tracking_detections(detections)
@@ -634,6 +648,15 @@ class Application:
                 self._telemetry.log_frame(telem)
 
                 if self._frame_count % 60 == 0:
+                    timing = self._last_frame_stage_timings
+                    ml_suffix = ""
+                    if timing.get("ml_total_ms", 0.0) > 0.0:
+                        ml_suffix = (
+                            f" | Spatial: {timing.get('spatial_ms', 0.0):6.2f}ms"
+                            f" | ML prep: {timing.get('ml_preprocess_ms', 0.0):6.2f}ms"
+                            f" | ML inf: {timing.get('ml_inference_ms', 0.0):6.2f}ms"
+                            f" | ML total: {timing.get('ml_total_ms', 0.0):6.2f}ms"
+                        )
                     print(
                         f"Frame {self._frame_count:6d} | "
                         f"FPS: {self._current_fps:6.1f} | "
@@ -641,6 +664,7 @@ class Application:
                         f"Detections: {len(detections)} | "
                         f"Tracks: {len(tracks)} | "
                         f"Actions: {len(actions)}"
+                        f"{ml_suffix}"
                     )
                     sys.stdout.flush()
 
@@ -944,12 +968,22 @@ class Application:
                     break
 
                 if self._frame_count % 60 == 0:
+                    timing = self._last_frame_stage_timings
+                    ml_suffix = ""
+                    if timing.get("ml_total_ms", 0.0) > 0.0:
+                        ml_suffix = (
+                            f" | Spatial: {timing.get('spatial_ms', 0.0):6.2f}ms"
+                            f" | ML prep: {timing.get('ml_preprocess_ms', 0.0):6.2f}ms"
+                            f" | ML inf: {timing.get('ml_inference_ms', 0.0):6.2f}ms"
+                            f" | ML total: {timing.get('ml_total_ms', 0.0):6.2f}ms"
+                        )
                     print(
                         f"Frame {self._frame_count:6d} | "
                         f"FPS: {self._current_fps:6.1f} | "
                         f"Proc: {proc_ms:6.2f}ms | "
                         f"Clicks: {self._total_clicks:5d} | "
                         f"Input: {'ON' if self._input_enabled else 'OFF'}"
+                        f"{ml_suffix}"
                     )
                     sys.stdout.flush()
 
