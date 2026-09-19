@@ -52,8 +52,6 @@ class BalloonExecutor:
         self._idle_until = 0.0
         self._g_decision_target_id = None
         self._g_should_execute = True
-        self._special_fail_target_id = None
-        self._special_should_execute = True
         self._last_behavior_plan_ms = 0.0
 
     @property
@@ -196,12 +194,9 @@ class BalloonExecutor:
                         self._diagnostic.log("gemini_gate", candidate_count=len(multicolor_specials), notification_count=0, selected=gemini_gate_result, reason="behavioral_gemini_without_notification_probability")
                 elif actions:
                     action = actions[0]
-                if isinstance(action, BalloonAction) and action.target_type.value == "special_sequence_balloon":
-                    if action.target_id != self._special_fail_target_id:
-                        self._special_fail_target_id = action.target_id
-                        self._special_should_execute = not getattr(self._behavior, "should_fail_super_g", lambda: False)()
-                    if not self._special_should_execute:
-                        action = None
+                # G precursors are a prerequisite game mechanic, not an
+                # optional Super-G behavior sample. Never apply the legacy
+                # should_fail_super_g() gate to them.
                 if action is not None and self._diagnostic:
                     self._diagnostic.log("action_start_attempt", lane="primary_or_twin", target=self._action_info(action), accepted=True, reason=None)
                 elif action is None and self._diagnostic:
@@ -247,9 +242,23 @@ class BalloonExecutor:
             self._active_primary = None
             self._primary_scheduler.clear()
             idle_gap = self._behavior.sample_idle_gap_s() if hasattr(self._behavior, 'sample_idle_gap_s') else 0.0
-            self._idle_until = self._clock() + idle_gap
+            # Give the four-node G precursor sequence a deterministic minimum
+            # inter-click gap. The normal behavioral model still contributes
+            # its sampled idle gap when that is longer.
+            precursor_gap_s = 0.100 if (
+                completed_primary_action is not None
+                and completed_primary_action.metadata.get("g_precursor", False)
+            ) else 0.0
+            self._idle_until = self._clock() + max(idle_gap, precursor_gap_s)
             if self._diagnostic:
-                self._diagnostic.log("action_complete", lane="primary", target=self._action_info(completed_primary_action), idle_gap_s=idle_gap, idle_until=self._idle_until)
+                self._diagnostic.log(
+                    "action_complete",
+                    lane="primary",
+                    target=self._action_info(completed_primary_action),
+                    idle_gap_s=idle_gap,
+                    precursor_gap_s=precursor_gap_s,
+                    idle_until=self._idle_until,
+                )
 
         return BalloonExecutionResult(
             clicks_sent=clicks,
