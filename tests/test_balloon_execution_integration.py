@@ -267,6 +267,31 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         disappeared = self.executor.tick([], None, self.input, 0, 0, True)
         self.assertFalse(disappeared.g_click_completed)
 
+    def test_g_precursor_survives_tracker_id_churn_when_same_color_is_nearby(self):
+        active = self.engine.decide([
+            balloon_action(
+                TargetType.SPECIAL_SEQUENCE_BALLOON,
+                BalloonColor.RED,
+                (500, 500),
+                101,
+            )
+        ]).actions[0]
+        replacement = self.engine.decide([
+            balloon_action(
+                TargetType.SPECIAL_SEQUENCE_BALLOON,
+                BalloonColor.RED,
+                (530, 515),
+                202,
+            )
+        ]).actions[0]
+        self.assertTrue(active.metadata.get("g_precursor"))
+        self.assertTrue(
+            self.executor._special_precursor_replacement_observed(
+                active,
+                [replacement],
+            )
+        )
+
     def test_primary_action_is_cancelled_if_target_disappears_before_dispatch(self):
         action = self.engine.decide([
             balloon_action(TargetType.NORMAL_BALLOON, BalloonColor.RED, (100, 100), 31)
