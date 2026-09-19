@@ -196,21 +196,51 @@ class BalloonVisionProfilingTests(unittest.TestCase):
         )
 
 
-    def test_boundary_contrast_is_recorded_for_balloon_candidates(self):
+    def test_small_and_large_balloons_use_cheap_circle_geometry(self):
         profile = BalloonGameProfile()
-        frame = np.full((180, 240, 3), 255, dtype=np.uint8)
-        cv2.circle(frame, (120, 80), 25, (255, 0, 0), thickness=-1)
+        frame = np.full((260, 360, 3), 255, dtype=np.uint8)
+        cv2.circle(frame, (80, 70), 13, (0, 0, 255), thickness=-1)
+        cv2.circle(frame, (250, 170), 42, (255, 0, 0), thickness=-1)
+
+        # Ordinary balloons must not invoke the expensive ring/Hough path.
+        def fail_ring(*args, **kwargs):
+            raise AssertionError("ordinary balloons invoked ring/Hough detection")
+
+        profile._ring.detect = fail_ring
+        detections = profile.detect(frame)
+
+        balloons = [
+            d for d in detections
+            if d.get("target_type") == "normal_balloon"
+        ]
+        self.assertGreaterEqual(len(balloons), 2)
+        geometry = profile.last_profile["candidate_geometry"]
+        self.assertTrue(any(g["width"] <= 30 for g in geometry))
+        self.assertTrue(any(g["width"] >= 70 for g in geometry))
+        self.assertEqual(profile.last_profile["hough_call_count"], 0)
+
+    def test_static_score_counter_geometry_is_rejected_but_balloon_in_region_survives(self):
+        profile = BalloonGameProfile()
+        frame = np.full((500, 1200, 3), 255, dtype=np.uint8)
+
+        # Observed score-counter-like tall/narrow colored component.
+        cv2.ellipse(
+            frame,
+            (1040, 310),
+            (34, 50),
+            0,
+            0,
+            360,
+            (255, 0, 0),
+            thickness=-1,
+        )
+        # A genuine round balloon is allowed to occupy the same static UI area.
+        cv2.circle(frame, (1040, 310), 27, (0, 0, 255), thickness=-1)
 
         detections = profile.detect(frame)
-        self.assertTrue(any(d.get("target_type") == "normal_balloon" for d in detections))
-        candidate = next(
-            g for g in profile.last_profile["candidate_geometry"]
-            if g["color"] == "blue"
-        )
-        self.assertGreaterEqual(
-            candidate["boundary_contrast"],
-            profile._MIN_BOUNDARY_CONTRAST,
-        )
+        red = [d for d in detections if d.get("color_name") == "red"]
+        self.assertTrue(any(d.get("target_type") == "normal_balloon" for d in red))
+        self.assertGreaterEqual(profile.last_profile["score_ui_rejections"], 1)
 
     def test_filled_colored_balloon_remains_detectable(self):
         profile = BalloonGameProfile()
