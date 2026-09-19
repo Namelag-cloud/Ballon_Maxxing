@@ -71,8 +71,8 @@ class TestBalloonVision(unittest.TestCase):
         self._balloon(frame, (180, 250), 80, "blue")
         self._balloon(frame, (400, 250), 80, "red")
         self._balloon(frame, (620, 250), 80, "yellow")
-        self._balloon(frame, (700, 650), 52, "yellow", ring=True, ring_radius=95)
-        self._balloon(frame, (840, 650), 52, "yellow", ring=True, ring_radius=95)
+        self._balloon(frame, (700, 650), 25, "yellow", ring=True, ring_radius=46)
+        self._balloon(frame, (840, 650), 25, "yellow", ring=True, ring_radius=46)
 
         detections = BalloonGameProfile().detect(frame)
         twins = [d for d in detections if d["target_type"] == TargetType.TWIN_BALLOON.value]
