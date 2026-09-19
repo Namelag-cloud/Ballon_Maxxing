@@ -31,6 +31,16 @@ def detection(
         "width": 40.0,
         "height": 40.0,
         "target_id": target_id,
+        "metadata": {
+            "semantic_confirmed": target_type in {
+                TargetType.SPECIAL_SEQUENCE_BALLOON,
+                TargetType.TWIN_BALLOON,
+                TargetType.MULTICOLOR_SPECIAL,
+            },
+            "semantic_pair_id": (
+                "test-pair" if target_type == TargetType.TWIN_BALLOON else None
+            ),
+        },
     }
 
 
