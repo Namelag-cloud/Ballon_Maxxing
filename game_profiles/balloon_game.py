@@ -961,14 +961,29 @@ class BalloonGameProfile(GameProfile):
                 )
                 if distance < self._GOLDEN_DUO_MIN_DISTANCE_PX:
                     continue
-                first_ring_score, first_ring_coverage = self._matching_outline_score(
-                    self._last_hsv_frame, first.bbox, first.color.value
-                )
-                second_ring_score, second_ring_coverage = self._matching_outline_score(
-                    self._last_hsv_frame, second.bbox, second.color.value
-                )
-                first_text_score = self._twin_text_likeness(self._last_hsv_frame, first.bbox)
-                second_text_score = self._twin_text_likeness(self._last_hsv_frame, second.bbox)
+                if self._last_hsv_frame is None:
+                    # Unit/source-grounded semantic callers may provide only
+                    # detections. Preserve the source rule (two same-color,
+                    # sufficiently separated small members) without inventing
+                    # pixel evidence that is unavailable.
+                    first_ring_score = first_ring_coverage = 0.0
+                    second_ring_score = second_ring_coverage = 0.0
+                    first_text_score = second_text_score = 0.0
+                    visual_evidence_available = False
+                else:
+                    first_ring_score, first_ring_coverage = self._matching_outline_score(
+                        self._last_hsv_frame, first.bbox, first.color.value
+                    )
+                    second_ring_score, second_ring_coverage = self._matching_outline_score(
+                        self._last_hsv_frame, second.bbox, second.color.value
+                    )
+                    first_text_score = self._twin_text_likeness(
+                        self._last_hsv_frame, first.bbox
+                    )
+                    second_text_score = self._twin_text_likeness(
+                        self._last_hsv_frame, second.bbox
+                    )
+                    visual_evidence_available = True
 
                 first_ring_ok = (
                     first_ring_score >= self._TWIN_RING_MIN_COLOR_RATIO
@@ -981,7 +996,7 @@ class BalloonGameProfile(GameProfile):
                 first_text_ok = first_text_score >= self._TWIN_TEXT_MIN_SCORE
                 second_text_ok = second_text_score >= self._TWIN_TEXT_MIN_SCORE
 
-                if not (
+                if visual_evidence_available and not (
                     (first_ring_ok or first_text_ok)
                     and (second_ring_ok or second_text_ok)
                 ):
@@ -1123,8 +1138,8 @@ class BalloonGameProfile(GameProfile):
         mask[~inner] = 0
         mask = cv2.morphologyEx(
             mask,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1)),
             cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1)),
             iterations=1,
         )
         count, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
