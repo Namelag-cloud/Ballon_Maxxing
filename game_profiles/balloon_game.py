@@ -57,6 +57,13 @@ class BalloonGameProfile(GameProfile):
     _WHITE_MIN_DIAMETER_RATIO = 0.05
     _TWIN_WHITE_BORDER_RATIO = 0.10
     _SPECIAL_RELATIVE_DIAMETER = 0.82
+    _TWIN_RING_INNER_SCALE = 1.05
+    _TWIN_RING_OUTER_SCALE = 1.75
+    _TWIN_RING_MIN_COLOR_RATIO = 0.025
+    _TWIN_RING_MIN_SECTOR_COVERAGE = 0.18
+    _TWIN_TEXT_MIN_SCORE = 0.08
+    _NOTIFICATION_HALO_MIN_RATIO = 0.015
+    _NOTIFICATION_HALO_MIN_SECTOR_COVERAGE = 0.16
 
     # Ground-truth engine invariants. These are deliberately kept separate from
     # pixel thresholds so future renderer-specific calibration does not weaken
@@ -97,6 +104,7 @@ class BalloonGameProfile(GameProfile):
         self._super_group_age = 0
         self._super_g_terminal = False
         self._duo_pairs: list[dict] = []
+        self._last_hsv_frame: np.ndarray | None = None
         self._color_component_hints: dict[str, list[tuple[tuple[int, int, int, int], int, tuple[float, float]]]] = {}
 
     @staticmethod
@@ -155,6 +163,7 @@ class BalloonGameProfile(GameProfile):
             "score_ui_rejections": 0,
             "notification_ms": 0.0,
             "notification_count": 0,
+            "notification_halo_candidates": 0,
             "semantic": {
                 "super_g_confirmed": False,
                 "super_g_member_ids": [],
@@ -182,10 +191,12 @@ class BalloonGameProfile(GameProfile):
         """Return structured detections serialized for the existing profile API."""
         total_t0 = time.perf_counter()
         self._last_profile = self._empty_profile()
+        self._last_hsv_frame = None
         self._color_component_hints = {color: [] for color in ("blue", "red", "yellow", "green")}
 
         hsv_t0 = time.perf_counter()
         hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
+        self._last_hsv_frame = hsv
         self._last_profile["hsv_ms"] = (time.perf_counter() - hsv_t0) * 1000.0
 
         candidates: list[TargetDetection] = []
@@ -203,6 +214,7 @@ class BalloonGameProfile(GameProfile):
             time.perf_counter() - notification_t0
         ) * 1000.0
         self._last_profile["notification_count"] = notification_count
+        self._last_profile["notification_halo_candidates"] = notification_count
 
         multicolor_t0 = time.perf_counter()
         candidates.extend(
@@ -647,6 +659,13 @@ class BalloonGameProfile(GameProfile):
             if circularity < 0.45:
                 continue
 
+            halo_score, halo_sector_coverage = self._notification_halo_score(hsv, (x, y, w, h))
+            if (
+                halo_score < self._NOTIFICATION_HALO_MIN_RATIO
+                or halo_sector_coverage < self._NOTIFICATION_HALO_MIN_SECTOR_COVERAGE
+            ):
+                continue
+
             detections.append(
                 TargetDetection(
                     target_type=TargetType.NOTIFICATION,
@@ -664,6 +683,8 @@ class BalloonGameProfile(GameProfile):
                     metadata={
                         "semantic_class": "notification",
                         "semantic_confirmed": True,
+                        "notification_halo_score": halo_score,
+                        "notification_halo_sector_coverage": halo_sector_coverage,
                     },
                 )
             )
@@ -940,13 +961,44 @@ class BalloonGameProfile(GameProfile):
                 )
                 if distance < self._GOLDEN_DUO_MIN_DISTANCE_PX:
                     continue
-                if bgr_frame is not None:
-                    first_ring = self._ring.detect(bgr_frame, first.bbox)
-                    self._record_ring_profile(first_ring)
-                    second_ring = self._ring.detect(bgr_frame, second.bbox)
-                    self._record_ring_profile(second_ring)
-                    if not (first_ring.detected and second_ring.detected):
-                        continue
+                first_ring_score, first_ring_coverage = self._matching_outline_score(
+                    self._last_hsv_frame, first.bbox, first.color.value
+                )
+                second_ring_score, second_ring_coverage = self._matching_outline_score(
+                    self._last_hsv_frame, second.bbox, second.color.value
+                )
+                first_text_score = self._twin_text_likeness(self._last_hsv_frame, first.bbox)
+                second_text_score = self._twin_text_likeness(self._last_hsv_frame, second.bbox)
+
+                first_ring_ok = (
+                    first_ring_score >= self._TWIN_RING_MIN_COLOR_RATIO
+                    and first_ring_coverage >= self._TWIN_RING_MIN_SECTOR_COVERAGE
+                )
+                second_ring_ok = (
+                    second_ring_score >= self._TWIN_RING_MIN_COLOR_RATIO
+                    and second_ring_coverage >= self._TWIN_RING_MIN_SECTOR_COVERAGE
+                )
+                first_text_ok = first_text_score >= self._TWIN_TEXT_MIN_SCORE
+                second_text_ok = second_text_score >= self._TWIN_TEXT_MIN_SCORE
+
+                if not (
+                    (first_ring_ok or first_text_ok)
+                    and (second_ring_ok or second_text_ok)
+                ):
+                    continue
+
+                first.metadata = {
+                    **first.metadata,
+                    "twin_ring_color_ratio": first_ring_score,
+                    "twin_ring_sector_coverage": first_ring_coverage,
+                    "twin_text_score": first_text_score,
+                }
+                second.metadata = {
+                    **second.metadata,
+                    "twin_ring_color_ratio": second_ring_score,
+                    "twin_ring_sector_coverage": second_ring_coverage,
+                    "twin_text_score": second_text_score,
+                }
                 pairs.append((first, second))
                 used.update({i, j})
                 break
@@ -989,6 +1041,129 @@ class BalloonGameProfile(GameProfile):
                 )
             )
         return result
+
+    @classmethod
+    def _annulus_mask(
+        cls,
+        shape: tuple[int, int],
+        bbox: tuple[int, int, int, int],
+        inner_scale: float,
+        outer_scale: float,
+    ) -> np.ndarray:
+        height, width = shape
+        x, y, w, h = bbox
+        yy, xx = np.ogrid[:height, :width]
+        cx = x + w / 2.0
+        cy = y + h / 2.0
+        rx = max(1.0, w / 2.0)
+        ry = max(1.0, h / 2.0)
+        radial = np.sqrt(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2)
+        return (radial >= inner_scale) & (radial <= outer_scale)
+
+    def _matching_outline_score(
+        self,
+        hsv: np.ndarray | None,
+        bbox: tuple[int, int, int, int],
+        color_name: str,
+    ) -> tuple[float, float]:
+        if hsv is None or color_name not in self._settings.colors:
+            return 0.0, 0.0
+        color_mask = self._classifier.make_color_mask(hsv, color_name)
+        annulus = self._annulus_mask(
+            hsv.shape[:2], bbox,
+            self._TWIN_RING_INNER_SCALE,
+            self._TWIN_RING_OUTER_SCALE,
+        )
+        pixels = color_mask[annulus] > 0
+        if pixels.size == 0:
+            return 0.0, 0.0
+        ratio = float(np.mean(pixels))
+        height, width = hsv.shape[:2]
+        yy, xx = np.indices((height, width))
+        x, y, w, h = bbox
+        cx = x + w / 2.0
+        cy = y + h / 2.0
+        angles = (np.arctan2(yy - cy, xx - cx) + 2.0 * np.pi) % (2.0 * np.pi)
+        sector_ids = np.floor(angles / (2.0 * np.pi / 8.0)).astype(np.int32)
+        hits = []
+        for sector in range(8):
+            sector_mask = annulus & (sector_ids == sector)
+            if np.any(sector_mask):
+                hits.append(float(np.mean(color_mask[sector_mask] > 0)))
+        coverage = float(
+            sum(v >= self._TWIN_RING_MIN_COLOR_RATIO for v in hits)
+        ) / max(1, len(hits))
+        return ratio, coverage
+
+    @staticmethod
+    def _twin_text_likeness(
+        hsv: np.ndarray | None,
+        bbox: tuple[int, int, int, int],
+    ) -> float:
+        if hsv is None:
+            return 0.0
+        x, y, w, h = bbox
+        if w < 8 or h < 8:
+            return 0.0
+        region = hsv[y:y + h, x:x + w]
+        if region.size == 0:
+            return 0.0
+        s = region[:, :, 1].astype(np.int16)
+        v = region[:, :, 2].astype(np.int16)
+        mask = ((s <= 65) & ((v <= 95) | (v >= 205))).astype(np.uint8) * 255
+        yy, xx = np.ogrid[:h, :w]
+        cx, cy = w / 2.0, h / 2.0
+        inner = ((xx - cx) / max(1.0, w * 0.42)) ** 2 + ((yy - cy) / max(1.0, h * 0.42)) ** 2 <= 1.0
+        mask[~inner] = 0
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1)),
+            cv2.MORPH_OPEN,
+            iterations=1,
+        )
+        count, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        components = []
+        for label in range(1, count):
+            cw, ch, area = [int(v) for v in stats[label, 2:5]]
+            if 1 <= area <= max(4, int(w * h * 0.08)) and cw <= max(4, w // 2) and ch <= max(4, h // 2):
+                components.append(area)
+        if not components:
+            return 0.0
+        area_score = sum(components) / float(max(1, w * h))
+        count_score = min(1.0, len(components) / 8.0)
+        return float(min(1.0, area_score * 8.0 + count_score * 0.5))
+
+    @classmethod
+    def _notification_halo_score(
+        cls,
+        hsv: np.ndarray,
+        bbox: tuple[int, int, int, int],
+    ) -> tuple[float, float]:
+        red_mask = cv2.inRange(
+            hsv,
+            np.array([0, 70, 80], dtype=np.uint8),
+            np.array([12, 255, 255], dtype=np.uint8),
+        )
+        annulus = cls._annulus_mask(hsv.shape[:2], bbox, 1.02, 1.85)
+        pixels = red_mask[annulus] > 0
+        if pixels.size == 0:
+            return 0.0, 0.0
+        ratio = float(np.mean(pixels))
+        height, width = hsv.shape[:2]
+        yy, xx = np.indices((height, width))
+        x, y, w, h = bbox
+        cx, cy = x + w / 2.0, y + h / 2.0
+        angles = (np.arctan2(yy - cy, xx - cx) + 2.0 * np.pi) % (2.0 * np.pi)
+        sector_ids = np.floor(angles / (2.0 * np.pi / 8.0)).astype(np.int32)
+        hits = []
+        for sector in range(8):
+            sector_mask = annulus & (sector_ids == sector)
+            if np.any(sector_mask):
+                hits.append(float(np.mean(red_mask[sector_mask] > 0)))
+        coverage = float(
+            sum(v >= cls._NOTIFICATION_HALO_MIN_RATIO for v in hits)
+        ) / max(1, len(hits))
+        return ratio, coverage
 
     def _update_candidate_history(self, detections: list[TargetDetection]) -> None:
         self._semantic_frame += 1
