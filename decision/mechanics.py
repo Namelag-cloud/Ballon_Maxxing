@@ -67,21 +67,45 @@ class BalloonDecisionEngine:
             if d.get("target_type") == TargetType.SPECIAL_SEQUENCE_BALLOON.value
             and d.get("metadata", {}).get("semantic_confirmed", False)
         ]
-        if self.state.mode == GameMode.NORMAL_PLAY and not self.state.special_sequence_seen and special:
+
+        # The four G precursors spawn together, but are not guaranteed to be
+        # spatially close. Arm the one-shot sequence only when one observation
+        # contains all four colors. A partial set must never start the sequence.
+        special_colors = {
+            d.get("color_name")
+            for d in special
+            if d.get("color_name") is not None
+        }
+        required_colors = {color.value for color in self._SPECIAL_ORDER}
+        if (
+            self.state.mode == GameMode.NORMAL_PLAY
+            and not self.state.special_sequence_seen
+            and required_colors.issubset(special_colors)
+        ):
             self.state.mode = GameMode.SPECIAL_SEQUENCE
             self.state.special_step = SpecialSequenceStep.BLUE
             self.state.special_sequence_seen = True
 
         if self.state.mode == GameMode.SPECIAL_SEQUENCE:
-            # Super-G is an exclusive sequence: do not let normal balloons,
-            # Gemini, or the G-symbol lane interleave clicks while the four-node
-            # sequence is active. The game itself advances only on the required
-            # color, so the executor receives exactly one eligible target.
+            # Once armed, the precursor sequence is strict and exclusive:
+            # B -> R -> Y -> G. Ordinary balloons/twins must not consume the
+            # primary lane between precursor clicks.
             actions = self._select_required_special(special)
             g_action = None
             executable_specials = []
         else:
             actions = self._select_normal_play(visible)
+
+            # After the precursor sequence has completed, the next
+            # super_g_ring detection is the actual Super-G. Keep it in the
+            # independent G lane so ordinary balloons/twins can continue.
+            if self.state.super_g_ready and special:
+                self.state.super_g_ready = False
+                self.state.super_g_active = True
+
+            if self.state.super_g_active and special:
+                g_action = self._make_action(special[0], is_g=True)
+                g_action.metadata["super_g_active"] = True
 
             if executable_specials:
                 # Gemini consumes all active notifications when clicked, so a
@@ -110,6 +134,8 @@ class BalloonDecisionEngine:
         if step_index == len(self._SPECIAL_ORDER) - 1:
             self.state.mode = GameMode.NORMAL_PLAY
             self.state.special_step = SpecialSequenceStep.COMPLETE
+            self.state.super_g_ready = True
+            self.state.super_g_active = False
             return True
         self.state.special_step = SpecialSequenceStep(self._SPECIAL_ORDER[step_index + 1].value)
         return True
@@ -120,7 +146,10 @@ class BalloonDecisionEngine:
             return []
         for detection in detections:
             if detection.get("color_name") == required.value:
-                return [self._make_action(detection, is_special=True)]
+                action = self._make_action(detection, is_special=True)
+                action.metadata["g_precursor"] = True
+                action.metadata["sequence_step"] = required.value
+                return [action]
         return []
 
     def _select_normal_play(self, detections: list[dict[str, Any]]):
