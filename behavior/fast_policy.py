@@ -32,6 +32,7 @@ class FastExecutionPolicy:
         self._clock = clock
         self._diagnostic = diagnostic
         self._rng = __import__("random").Random()
+        self._last_click_down_ts: float | None = None
         self._recent_fast_clicks: list[
             tuple[float, int | None, tuple[int, int], float]
         ] = []
@@ -86,6 +87,12 @@ class FastExecutionPolicy:
                 g_action.target_width,
             )
             g_ts = self._fast_click(input_backend, g_screen)
+            self._log_click_timing(
+                g_ts,
+                lane="g",
+                target=g_action,
+                click_kind=self._click_kind(g_action),
+            )
             clicks += 1
             g_completed = True
             input_timestamp = g_ts.click_up
@@ -189,6 +196,18 @@ class FastExecutionPolicy:
                 clicks += 2
                 input_timestamp = max(first_up, second_up)
                 action_timestamps = first_ts
+                self._log_click_timing(
+                    first_ts,
+                    lane="twin",
+                    target=first,
+                    click_kind="twin",
+                )
+                self._log_click_timing(
+                    second_ts,
+                    lane="twin",
+                    target=second,
+                    click_kind="twin",
+                )
                 outcomes.extend(
                     (
                         self._make_outcome(
@@ -247,6 +266,12 @@ class FastExecutionPolicy:
                 action.target_width,
             )
             action_timestamps = self._fast_click(input_backend, screen_xy)
+            self._log_click_timing(
+                action_timestamps,
+                lane="primary",
+                target=action,
+                click_kind=self._click_kind(action),
+            )
             clicks += 1
             input_timestamp = action_timestamps.click_up
             completed_primary_action = action
@@ -353,6 +378,64 @@ class FastExecutionPolicy:
             click_up=click_up,
             action_complete=click_up,
         )
+
+    def _log_click_timing(
+        self,
+        timestamps: ActionTimestamps,
+        *,
+        lane: str,
+        target: BalloonAction,
+        click_kind: str,
+    ) -> None:
+        if not self._diagnostic:
+            return
+
+        click_down = timestamps.click_down
+        click_up = timestamps.click_up
+        if click_down is None or click_up is None:
+            return
+
+        previous_click_down = self._last_click_down_ts
+        inter_click_gap_ms = (
+            max(0.0, (click_down - previous_click_down) * 1000.0)
+            if previous_click_down is not None
+            else None
+        )
+        movement_ms = max(
+            0.0,
+            (timestamps.movement_end - timestamps.movement_start) * 1000.0,
+        )
+        hold_ms = max(0.0, (click_up - click_down) * 1000.0)
+        input_ms = max(
+            0.0,
+            (click_up - timestamps.action_planned) * 1000.0,
+        )
+
+        self._diagnostic.log(
+            "click_timing",
+            lane=lane,
+            click_kind=click_kind,
+            target=self._action_info(target),
+            action_planned_ts=timestamps.action_planned,
+            movement_start_ts=timestamps.movement_start,
+            movement_end_ts=timestamps.movement_end,
+            click_down_ts=click_down,
+            click_up_ts=click_up,
+            movement_ms=movement_ms,
+            click_hold_ms=hold_ms,
+            input_total_ms=input_ms,
+            inter_click_down_gap_ms=inter_click_gap_ms,
+        )
+        self._last_click_down_ts = click_down
+
+    @staticmethod
+    def _click_kind(action: BalloonAction) -> str:
+        metadata = action.metadata or {}
+        if metadata.get("super_g_active", False):
+            return "super_g"
+        if metadata.get("g_precursor", False):
+            return "g_precursor"
+        return action.target_type.value
 
     @staticmethod
     def _fast_behavioral_action(
