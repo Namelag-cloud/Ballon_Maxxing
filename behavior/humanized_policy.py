@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 import math
 import random
+import time
 
 from behavior.fast_policy import FastExecutionPolicy
+from behavior.action_scheduler import ActionTimestamps, TwinActionCompletion
 from diagnostics.downstream import DownstreamDiagnostic
-from game_profiles.balloon_types import BalloonAction, TwinAction
+from game_profiles.balloon_types import BalloonAction, TargetType, TwinAction
 from telemetry.outcome import SessionOutcome
 from behavior.profile import HumanProfile
 from .execution_policy import (
@@ -18,14 +20,30 @@ from .execution_policy import (
 
 
 class HumanizedExecutionPolicy:
-    """Fast execution with only a small, radius-safe endpoint offset.
+    """Humanized execution at the execution boundary.
 
-    Phase B deliberately stays at the execution boundary: vision, tracking,
-    decision mechanics, cadence, and G-lane mechanics remain unchanged.
+    Vision, tracking, decision mechanics, and the fast policy remain unchanged.
+    Normal endpoints receive radius-safe spatial offsets. Reaction delays are
+    sampled per target type and applied before dispatch. The actual G target
+    keeps the old center-click behavior.
     """
 
     _OFFSET_SIGMA_PX = 5.0
     _RADIUS_SAFETY_MARGIN_PX = 1.0
+    _GAUSSIAN_Z_99 = 2.576
+    _ENGINE_TICK_MS = 1000.0 / 60.0
+    _COMBO_MAX_DELAY_MS = 400.0
+
+    # Explicit timing walls derived from the game engine.
+    _REACTION_BOUNDS_MS = {
+        "standard": (150.0, 800.0),
+        "notification": (150.0, 800.0),
+        "golden_duo_first": (150.0, 800.0),
+        "golden_duo_second": (150.0, 600.0),
+        "gemini": (150.0, 1500.0),
+        "super_g_node": (150.0, 1500.0),
+        "balloon_g": (150.0, 500.0),
+    }
 
     def __init__(
         self,
@@ -36,13 +54,17 @@ class HumanizedExecutionPolicy:
         self._diagnostic = diagnostic
         self._rng = rng or random.Random()
         self._profile: HumanProfile | None = None
+        self._last_reaction_ticks: float | None = None
+        self._session_started_at: float | None = None
         self._fast = FastExecutionPolicy(
             diagnostic=diagnostic,
         )
 
     def set_profile(self, profile: HumanProfile) -> None:
-        """Bind the immutable per-session profile used by endpoint sampling."""
+        """Bind the immutable per-session profile used by reaction/offset sampling."""
         self._profile = profile
+        self._last_reaction_ticks = profile.reaction_mu_ticks
+        self._session_started_at = None
 
     def tick(
         self,
@@ -53,23 +75,87 @@ class HumanizedExecutionPolicy:
         if not context.input_enabled:
             return BalloonExecutionResult()
 
-        transformed = replace(
-            decision,
-            actions=tuple(self._offset_action(action) for action in decision.actions),
-            # Preserve the old center-click behavior for the actual G target.
-            # The G hit path is sensitive enough that the generic endpoint offset
-            # should not be stacked on top of ML/tracker localization error.
-            g_action=decision.g_action,
-            multicolor_specials=tuple(
-                self._offset_action(action)
-                for action in decision.multicolor_specials
-            ),
-            notifications=tuple(
-                self._offset_action(action)
-                for action in decision.notifications
-            ),
-        )
-        return self._fast.tick(transformed, context, input_backend)
+        if self._session_started_at is None:
+            self._session_started_at = time.perf_counter()
+
+        combined = BalloonExecutionResult()
+
+        # Preserve FastExecutionPolicy's G-first ordering, but give the actual
+        # G target its target-specific reaction delay while keeping its center.
+        if decision.g_action is not None:
+            delay_s = self._reaction_delay_s(
+                decision.g_action.target_type,
+                is_twin_second=False,
+                combo_eligible=False,
+            )
+            time.sleep(delay_s)
+            g_decision = replace(
+                decision,
+                actions=(),
+                g_action=decision.g_action,
+                multicolor_specials=(),
+                notifications=(),
+            )
+            g_result = self._fast.tick(g_decision, context, input_backend)
+            combined = self._combine(combined, g_result)
+
+        for action in decision.actions:
+            if isinstance(action, TwinAction):
+                first = self._offset_balloon(action.targets[0])
+                second = self._offset_balloon(action.targets[1])
+
+                first_delay = self._reaction_delay_s(
+                    first.target_type,
+                    is_twin_second=False,
+                    combo_eligible=True,
+                )
+                time.sleep(first_delay)
+                first_result = self._fast_single(first, decision, context, input_backend)
+                combined = self._combine(combined, first_result)
+
+                second_delay = self._reaction_delay_s(
+                    second.target_type,
+                    is_twin_second=True,
+                    combo_eligible=True,
+                )
+                time.sleep(second_delay)
+                second_result = self._fast_single(second, decision, context, input_backend)
+                combined = self._combine(combined, second_result)
+
+                if (
+                    first_result.action_timestamps is not None
+                    and second_result.action_timestamps is not None
+                ):
+                    first_ts = first_result.action_timestamps
+                    second_ts = second_result.action_timestamps
+                    combined = replace(
+                        combined,
+                        twin_completion=TwinActionCompletion(
+                            first_ts,
+                            second_ts,
+                            abs(first_ts.click_down - second_ts.click_down) * 1000.0,
+                            second_delay * 1000.0,
+                        ),
+                        completed_primary_action=action,
+                    )
+                continue
+
+            transformed = self._offset_balloon(action)
+            delay_s = self._reaction_delay_s(
+                transformed.target_type,
+                is_twin_second=False,
+                combo_eligible=False,
+            )
+            time.sleep(delay_s)
+            result = self._fast_single(
+                transformed,
+                decision,
+                context,
+                input_backend,
+            )
+            combined = self._combine(combined, result)
+
+        return combined
 
     def shutdown(
         self,
@@ -77,6 +163,139 @@ class HumanizedExecutionPolicy:
         reason: str,
     ) -> tuple[SessionOutcome, ...]:
         return self._fast.shutdown(input_backend, reason)
+
+    def _fast_single(
+        self,
+        action: BalloonAction,
+        decision,
+        context: ExecutionContext,
+        input_backend: InputBackend,
+    ) -> BalloonExecutionResult:
+        single_decision = replace(
+            decision,
+            actions=(action,),
+            g_action=None,
+            multicolor_specials=(),
+            notifications=(),
+        )
+        return self._fast.tick(single_decision, context, input_backend)
+
+    @staticmethod
+    def _combine(
+        left: BalloonExecutionResult,
+        right: BalloonExecutionResult,
+    ) -> BalloonExecutionResult:
+        return BalloonExecutionResult(
+            clicks_sent=left.clicks_sent + right.clicks_sent,
+            input_timestamp=right.input_timestamp or left.input_timestamp,
+            action_timestamps=right.action_timestamps or left.action_timestamps,
+            twin_completion=right.twin_completion or left.twin_completion,
+            g_click_completed=left.g_click_completed or right.g_click_completed,
+            completed_primary_action=right.completed_primary_action or left.completed_primary_action,
+            outcomes=left.outcomes + right.outcomes,
+        )
+
+    def _reaction_delay_s(
+        self,
+        target_type: TargetType,
+        *,
+        is_twin_second: bool,
+        combo_eligible: bool,
+    ) -> float:
+        key = self._reaction_key(target_type, is_twin_second=is_twin_second)
+        lower_ms, upper_ms = self._REACTION_BOUNDS_MS[key]
+
+        # Midpoint gives the requested explicit center of each timing wall.
+        # Sigma is chosen so a symmetric Gaussian puts ~99% of its mass inside
+        # the bounds; the final draw is clipped defensively.
+        median_ms = (lower_ms + upper_ms) * 0.5
+        sigma_ms = min(median_ms - lower_ms, upper_ms - median_ms) / self._GAUSSIAN_Z_99
+        sampled_ms = self._rng.gauss(median_ms, sigma_ms)
+        sampled_ms = max(lower_ms, min(upper_ms, sampled_ms))
+
+        sampled_ticks = sampled_ms / self._ENGINE_TICK_MS
+        profile = self._profile
+        ar1 = profile.reaction_ar1 if profile is not None else 0.30
+        previous_ticks = (
+            self._last_reaction_ticks
+            if self._last_reaction_ticks is not None
+            else sampled_ticks
+        )
+        correlated_ticks = ar1 * previous_ticks + (1.0 - ar1) * sampled_ticks
+
+        # Preserve the existing profile's perception contribution and session
+        # modifiers, then enforce the target-specific timing wall again.
+        if profile is not None:
+            correlated_ticks += profile.perception_ticks
+            elapsed = (
+                max(0.0, time.perf_counter() - self._session_started_at)
+                if self._session_started_at is not None
+                else 0.0
+            )
+            warmup_factor = (
+                max(0.0, profile.warmup_sec - elapsed)
+                / max(0.001, profile.warmup_sec)
+                * 0.15
+            )
+            fatigue_factor = min(
+                0.30,
+                max(0.0, elapsed - 300.0)
+                / 60.0
+                * profile.fatigue_per_min
+                / 100.0,
+            )
+        else:
+            warmup_factor = 0.0
+            fatigue_factor = 0.0
+
+        actual_ms = (
+            correlated_ticks
+            * self._ENGINE_TICK_MS
+            * (1.0 + warmup_factor + fatigue_factor)
+        )
+        effective_upper_ms = min(
+            upper_ms,
+            self._COMBO_MAX_DELAY_MS if combo_eligible else upper_ms,
+        )
+        actual_ms = max(lower_ms, min(effective_upper_ms, actual_ms))
+        self._last_reaction_ticks = actual_ms / self._ENGINE_TICK_MS
+
+        if self._diagnostic:
+            self._diagnostic.log(
+                "humanized_reaction",
+                target_type=target_type.value,
+                reaction_key=key,
+                lower_ms=lower_ms,
+                upper_ms=upper_ms,
+                effective_upper_ms=effective_upper_ms,
+                sampled_ms=sampled_ms,
+                gaussian_median_ms=median_ms,
+                gaussian_sigma_ms=sigma_ms,
+                ar1=ar1,
+                warmup_factor=warmup_factor,
+                fatigue_factor=fatigue_factor,
+                final_delay_ms=actual_ms,
+            )
+
+        return actual_ms / 1000.0
+
+    @staticmethod
+    def _reaction_key(
+        target_type: TargetType,
+        *,
+        is_twin_second: bool,
+    ) -> str:
+        if target_type == TargetType.G_SYMBOL:
+            return "balloon_g"
+        if target_type == TargetType.MULTICOLOR_SPECIAL:
+            return "gemini"
+        if target_type == TargetType.NOTIFICATION:
+            return "notification"
+        if target_type == TargetType.TWIN_BALLOON:
+            return "golden_duo_second" if is_twin_second else "golden_duo_first"
+        if target_type == TargetType.SPECIAL_SEQUENCE_BALLOON:
+            return "super_g_node"
+        return "standard"
 
     def _offset_action(self, action: BalloonAction | TwinAction):
         if isinstance(action, TwinAction):
@@ -86,10 +305,19 @@ class HumanizedExecutionPolicy:
         return self._offset_balloon(action)
 
     def _offset_balloon(self, action: BalloonAction) -> BalloonAction:
+        # Actual G remains center-clicked; this preserves the known-working
+        # behavior after ML/tracker localization uncertainty.
+        if action.target_type == TargetType.G_SYMBOL:
+            return action
+
         radius = max(0.0, float(action.target_width) * 0.5)
         max_offset = max(0.0, radius - self._RADIUS_SAFETY_MARGIN_PX)
 
-        sigma = self._profile.spatial_sigma_px if self._profile is not None else self._OFFSET_SIGMA_PX
+        sigma = (
+            self._profile.spatial_sigma_px
+            if self._profile is not None
+            else self._OFFSET_SIGMA_PX
+        )
         dx = self._rng.gauss(0.0, sigma)
         dy = self._rng.gauss(0.0, sigma)
         magnitude = math.hypot(dx, dy)
@@ -106,8 +334,6 @@ class HumanizedExecutionPolicy:
         dispatch_x = int(round(center_x + dx))
         dispatch_y = int(round(center_y + dy))
 
-        # Integer rounding can add a fraction of a pixel. Keep the actual
-        # dispatched coordinate inside the conservative radius margin.
         actual_dx = dispatch_x - center_x
         actual_dy = dispatch_y - center_y
         actual_magnitude = math.hypot(actual_dx, actual_dy)
@@ -131,11 +357,9 @@ class HumanizedExecutionPolicy:
                 profile_spatial_sigma_px=sigma,
                 target_radius_px=radius,
                 safe_radius_px=max_offset,
-                clipped=clipped or (offset_x != round(dx) or offset_y != round(dy)),
+                clipped=clipped or (
+                    offset_x != round(dx) or offset_y != round(dy)
+                ),
             )
 
-        # The transformed position is the coordinate that FastExecutionPolicy
-        # hands to move_to(), so left_down() occurs at this exact OS cursor
-        # location. target_width is preserved, keeping the current-frame
-        # hitbox/radius available for the safety clamp.
         return replace(action, position=(dispatch_x, dispatch_y))
