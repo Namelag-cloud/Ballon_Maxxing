@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from behavior.action_scheduler import ActionTimestamps, TwinActionCompletion
+from telemetry.outcome import SessionOutcome
 from diagnostics.downstream import DownstreamDiagnostic
 
 from .execution_policy import (
@@ -29,7 +29,7 @@ class HumanizedExecutionPolicy:
         self,
         input_backend: InputBackend,
         reason: str,
-    ) -> tuple:
+    ) -> tuple[SessionOutcome, ...]:
         raise NotImplementedError(
             "HumanizedExecutionPolicy is not implemented until Phase B"
         )
