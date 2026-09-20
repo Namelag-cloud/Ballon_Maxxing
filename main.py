@@ -330,7 +330,10 @@ class Application:
             if self._balloon_decision is not None:
                 t0 = now_monotonic()
                 tracking_detections = self._game_profile.to_tracking_detections(detections)
-                tracks = self._tracker.update(tracking_detections)
+                tracks = self._tracker.update(
+                    tracking_detections,
+                    capture_timestamp=capture_ts,
+                )
                 tracking_ms = (now_monotonic() - t0) * 1000.0
                 current_detections = []
                 for track in tracks.values():
@@ -339,7 +342,7 @@ class Application:
                     observed = dict(track.metadata)
                     observed.update({
                         "target_id": track.id,
-                        "first_seen_timestamp": track.first_seen,
+                        "first_seen_timestamp": track.capture_timestamp,
                         "last_seen_timestamp": track.last_seen,
                         "center": track.position,
                         "bbox": track.bbox,
