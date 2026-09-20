@@ -158,8 +158,42 @@ class TelemetryLogger:
                     if len(self._frames) > 1 else 0.0
                 ),
             },
+            "extra_data_proxy": self._extra_data_proxy(),
             "outcomes_count": len(self._outcomes),
             "outcomes": [o.as_dict() for o in self._outcomes],
+        }
+
+    def _extra_data_proxy(self) -> dict:
+        """Log bot-side frame-timing proxies without claiming game payload access.
+
+        The authoritative game extra_data is produced inside the frozen browser
+        client from its rAF loop. The bot cannot read that payload without
+        violating the screen-only/no-page-access constraint. These values are
+        therefore explicitly labeled as capture-side proxies.
+        """
+        if len(self._frames) < 2:
+            return {
+                "source": "bot_capture_proxy",
+                "authoritative": False,
+                "tct": 0,
+                "msfd": 0,
+                "af": 0,
+                "screen": self._session_metadata.get("screen_capture"),
+            }
+
+        timestamps = np.asarray(
+            [frame.capture_timestamp for frame in self._frames],
+            dtype=float,
+        )
+        deltas_ms = np.diff(timestamps) * 1000.0
+        duration_s = max(0.001, float(timestamps[-1] - timestamps[0]))
+        return {
+            "source": "bot_capture_proxy",
+            "authoritative": False,
+            "tct": int(np.count_nonzero(deltas_ms > 100.0)),
+            "msfd": int(round(float(np.max(deltas_ms)))),
+            "af": int(round(len(self._frames) / duration_s)),
+            "screen": self._session_metadata.get("screen_capture"),
         }
 
     def save(self) -> None:
