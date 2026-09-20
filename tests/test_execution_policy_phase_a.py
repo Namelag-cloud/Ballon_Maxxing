@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from behavior.balloon_executor import BalloonExecutor
 from behavior.execution_policy import ExecutionContext
 from behavior.fast_policy import FastExecutionPolicy
 from behavior.humanized_policy import HumanizedExecutionPolicy
@@ -11,7 +12,7 @@ from decision.mechanics import BalloonDecisionEngine
 from game_profiles.balloon_types import BalloonColor, TargetType
 from main import parse_args, resolve_policy_name
 
-from tests.test_balloon_execution_integration import FakeClock, FakeInput, balloon_action
+from tests.test_balloon_execution_integration import FakeBehavior, FakeClock, FakeInput, balloon_action
 
 
 class TestExecutionPolicyPhaseA(unittest.TestCase):
@@ -92,6 +93,29 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
             [(100, 100), (200, 200)],
         )
         self.assertEqual(self.input.downs, [0.0, 0.0])
+
+    def test_executor_uses_injected_humanized_policy_without_fallback(self):
+        executor = BalloonExecutor(
+            FakeBehavior(),
+            clock=self.clock,
+            execution_policy=HumanizedExecutionPolicy(),
+        )
+        decision = self.engine.decide([
+            balloon_action(
+                TargetType.NORMAL_BALLOON,
+                BalloonColor.BLUE,
+                (100, 100),
+                61,
+            )
+        ])
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "HumanizedExecutionPolicy is not implemented until Phase B",
+        ):
+            executor.tick(decision.actions, None, self.input, 0, 0, True)
+
+        self.assertEqual(self.input.downs, [])
 
     def test_humanized_policy_fails_loudly_without_fallback(self):
         policy = HumanizedExecutionPolicy()
