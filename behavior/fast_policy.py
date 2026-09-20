@@ -10,7 +10,13 @@ from input.coordinates import frame_to_screen
 from telemetry.outcome import SessionOutcome
 from telemetry.timing import now_monotonic
 
-SEQUENTIAL_CLICK_GAP_RANGE_S = (0.030, 0.050)
+# Inter-click timing controls for already-planned action sequences.
+# Tune these independently when experimenting with different cadence profiles.
+NORMAL_CLICK_GAP_RANGE_S = (0.120, 0.200)
+G_PRECURSOR_CLICK_GAP_RANGE_S = (0.090, 0.140)
+SUPER_G_CLICK_GAP_RANGE_S = (0.090, 0.140)
+MULTICOLOR_SPECIAL_CLICK_GAP_RANGE_S = (0.090, 0.140)
+TWIN_CLICK_GAP_RANGE_S = (0.060, 0.100)
 NORMAL_CLICK_OFFSET_PX_RANGE = (-2, 2)
 
 from .execution_policy import (
@@ -38,8 +44,19 @@ class FastExecutionPolicy:
             tuple[float, int | None, tuple[int, int], float]
         ] = []
 
-    def _sequential_gap_s(self) -> float:
-        return self._rng.uniform(*SEQUENTIAL_CLICK_GAP_RANGE_S)
+    def _sequential_gap_s(self, action: BalloonAction) -> float:
+        if action.metadata and action.metadata.get("super_g_active", False):
+            gap_range = SUPER_G_CLICK_GAP_RANGE_S
+        elif action.metadata and action.metadata.get("g_precursor", False):
+            gap_range = G_PRECURSOR_CLICK_GAP_RANGE_S
+        elif action.target_type.value == "multicolor_special":
+            gap_range = MULTICOLOR_SPECIAL_CLICK_GAP_RANGE_S
+        else:
+            gap_range = NORMAL_CLICK_GAP_RANGE_S
+        return self._rng.uniform(*gap_range)
+
+    def _twin_gap_s(self) -> float:
+        return self._rng.uniform(*TWIN_CLICK_GAP_RANGE_S)
 
     def tick(
         self,
@@ -131,8 +148,8 @@ class FastExecutionPolicy:
 
         for action in actions:
             # The vision/decision layer can surface several visible targets in
-            # the same frame. Dispatch them as a rapid human-like sequence
-            # rather than issuing one uninterrupted burst of clicks.
+            # the same frame. Dispatch them sequentially using the timing
+            # range associated with the target category.
             if isinstance(action, TwinAction):
                 first, second = action.targets
                 pair_ids = (first.target_id, second.target_id)
@@ -153,7 +170,7 @@ class FastExecutionPolicy:
                     context.region_top,
                 )
                 if dispatched_primary_actions:
-                    time.sleep(self._sequential_gap_s())
+                    time.sleep(self._sequential_gap_s(action))
 
                 first_behavior = self._fast_behavioral_action(
                     first_xy,
@@ -166,7 +183,7 @@ class FastExecutionPolicy:
                 first_down, first_up, second_down, second_up = input_backend.click_pair(
                     first_xy,
                     second_xy,
-                    0.0,
+                    self._twin_gap_s(),
                 )
                 first_ts = ActionTimestamps(
                     action_planned=first_down,
@@ -255,7 +272,7 @@ class FastExecutionPolicy:
                 continue
 
             if dispatched_primary_actions:
-                time.sleep(self._sequential_gap_s())
+                time.sleep(self._sequential_gap_s(action))
 
             screen_xy = self._to_screen(
                 action.position,
