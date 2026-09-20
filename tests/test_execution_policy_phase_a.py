@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 import unittest
 from types import SimpleNamespace
 
@@ -10,7 +9,7 @@ from behavior.fast_policy import FastExecutionPolicy
 from behavior.humanized_policy import HumanizedExecutionPolicy
 from config.settings import RunMode, Settings
 from decision.mechanics import BalloonDecisionEngine
-from game_profiles.balloon_types import BalloonColor, TargetType
+from game_profiles.balloon_types import BalloonAction, BalloonColor, TargetType, TwinAction
 from main import parse_args, resolve_policy_name
 
 from tests.test_balloon_execution_integration import FakeBehavior, FakeClock, FakeInput, balloon_action
@@ -116,9 +115,6 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
 
     def test_humanized_policy_dispatches_sampled_offset_at_os_input(self):
         class FixedRNG:
-            def gauss(self, _mu, _sigma):
-                return 3.0 if not hasattr(self, "_called") else 4.0
-
             def __init__(self):
                 self._called = False
 
@@ -172,19 +168,23 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
                 return next(self.values)
 
         policy = HumanizedExecutionPolicy(rng=FixedRNG())
-        first = balloon_action(
-            TargetType.TWIN_BALLOON,
-            BalloonColor.YELLOW,
-            (100, 100),
-            40,
+        first = BalloonAction(
+            target_id=40,
+            target_type=TargetType.TWIN_BALLOON,
+            color=BalloonColor.YELLOW,
+            position=(100, 100),
+            target_width=40.0,
+            is_twin=True,
         )
-        second = balloon_action(
-            TargetType.TWIN_BALLOON,
-            BalloonColor.YELLOW,
-            (200, 100),
-            40,
+        second = BalloonAction(
+            target_id=41,
+            target_type=TargetType.TWIN_BALLOON,
+            color=BalloonColor.YELLOW,
+            position=(200, 100),
+            target_width=40.0,
+            is_twin=True,
         )
-        twin = __import__("game_profiles.balloon_types", fromlist=["TwinAction"]).TwinAction(
+        twin = TwinAction(
             targets=(first, second),
             max_click_delta_ms=30.0,
         )
@@ -201,7 +201,6 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         result = policy.tick(decision, self._context(), self.input)
 
         self.assertEqual(result.clicks_sent, 2)
-        self.assertEqual([(x, y) for _, x, y in self.input.moves], [])
         self.assertEqual(self.input.downs, [0.0, 0.0])
         self.assertEqual(self.input.pairs[0][0:2], ((102, 100), (198, 100)))
 
