@@ -229,6 +229,62 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         self.assertEqual([(x, y) for _, x, y in self.input.moves], [(102, 102)])
         self.assertEqual(self.input.downs, [0.0])
 
+    def test_humanized_reaction_walls_respect_engine_constraints(self):
+        class MaxRNG:
+            def gauss(self, _mu, _sigma):
+                return 1e9
+
+        policy = HumanizedExecutionPolicy(reaction_rng=MaxRNG())
+
+        # Standard targets retain the 150–800 ms nominal wall, but the
+        # combo-eligible execution path caps the actual delay at 400 ms.
+        standard = policy._reaction_delay_s(
+            TargetType.NORMAL_BALLOON,
+            is_twin_second=False,
+            combo_eligible=True,
+        )
+        self.assertGreaterEqual(standard * 1000.0, 150.0)
+        self.assertLessEqual(standard * 1000.0, 400.0)
+
+        g = policy._reaction_delay_s(
+            TargetType.G_SYMBOL,
+            is_twin_second=False,
+            combo_eligible=False,
+        )
+        self.assertGreaterEqual(g * 1000.0, 150.0)
+        self.assertLessEqual(g * 1000.0, 300.0)
+
+        gemini = policy._reaction_delay_s(
+            TargetType.MULTICOLOR_SPECIAL,
+            is_twin_second=False,
+            combo_eligible=False,
+        )
+        self.assertGreaterEqual(gemini * 1000.0, 150.0)
+        self.assertLessEqual(gemini * 1000.0, 1500.0)
+
+    def test_humanized_duo_delays_fit_inside_pair_window(self):
+        class MaxRNG:
+            def gauss(self, _mu, _sigma):
+                return 1e9
+
+        policy = HumanizedExecutionPolicy(reaction_rng=MaxRNG())
+        first = policy._reaction_delay_s(
+            TargetType.TWIN_BALLOON,
+            is_twin_second=False,
+            combo_eligible=False,
+        )
+        second = policy._reaction_delay_s(
+            TargetType.TWIN_BALLOON,
+            is_twin_second=True,
+            combo_eligible=False,
+        )
+
+        self.assertGreaterEqual(first * 1000.0, 150.0)
+        self.assertLessEqual(first * 1000.0, 300.0)
+        self.assertGreaterEqual(second * 1000.0, 150.0)
+        self.assertLessEqual(second * 1000.0, 300.0)
+        self.assertLessEqual((first + second) * 1000.0, 600.0)
+
     def test_humanized_policy_honors_disabled_input(self):
         policy = HumanizedExecutionPolicy()
         decision = self.engine.decide([
