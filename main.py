@@ -49,6 +49,9 @@ from decision.mechanics import BalloonDecisionEngine
 from behavior.model import BehavioralModel
 from behavior.action_scheduler import ActionScheduler
 from behavior.balloon_executor import BalloonExecutor
+from behavior.execution_policy import ExecutionContext, ExecutionPolicy
+from behavior.fast_policy import FastExecutionPolicy
+from behavior.humanized_policy import HumanizedExecutionPolicy
 from diagnostics.downstream import DownstreamDiagnostic
 from diagnostics.decision_console import DecisionConsole
 from training.candidate_collector import CandidateCollector
@@ -141,6 +144,8 @@ class Application:
         diagnostics_enabled: bool = True,
         verbose_decisions: bool = False,
         record_candidates: bool = False,
+        execution_policy: ExecutionPolicy | None = None,
+        diagnostic: DownstreamDiagnostic | None = None,
     ) -> None:
         self._settings = settings
         self._running = True
@@ -160,7 +165,7 @@ class Application:
         self._selector = TargetSelector(settings)
         self._verbose_decisions = verbose_decisions
         self._decision_console = DecisionConsole(verbose_decisions)
-        self._diagnostic = (
+        self._diagnostic = diagnostic if diagnostic is not None else (
             DownstreamDiagnostic()
             if diagnostics_enabled
             and game_profile
@@ -196,6 +201,7 @@ class Application:
                     self._behavior,
                     diagnostic=self._diagnostic,
                     fast_execution=self._fast_execution,
+                    execution_policy=execution_policy,
                 )
         if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
             self._balloon_decision = BalloonDecisionEngine(settings)
@@ -798,16 +804,20 @@ class Application:
                     if self._diagnostic:
                         self._diagnostic.log("frame_to_executor", frame_id=self._frame_count, passed=new_actions_allowed, decision_actions=[self._action_info_for_diag(a) for a in self._balloon_frame_decision.actions], passed_actions=[self._action_info_for_diag(a) for a in (self._balloon_frame_decision.actions if new_actions_allowed else ())], g_passed=new_actions_allowed and self._balloon_frame_decision.g_action is not None, notification_count=len(self._balloon_frame_decision.notifications) if new_actions_allowed else 0, multicolor_count=len(self._balloon_frame_decision.multicolor_specials) if new_actions_allowed else 0, behavioral_gate=self._behavior_gate_diag(self._duration))
                     executor_t0 = now_monotonic()
-                    execution = self._balloon_executor.tick(
-                        self._balloon_frame_decision.actions if new_actions_allowed else (),
-                        self._balloon_frame_decision.g_action if new_actions_allowed else None,
-                        self._input_backend,
-                        region.left,
-                        region.top,
-                        self._input_enabled,
-                        self._balloon_frame_decision.notifications if new_actions_allowed else (),
-                        self._balloon_frame_decision.multicolor_specials if new_actions_allowed else (),
+                    execution_context = ExecutionContext(
+                        frame_id=self._frame_count,
+                        now=executor_t0,
+                        capture_timestamp=capture_ts,
+                        region_left=region.left,
+                        region_top=region.top,
+                        input_enabled=self._input_enabled,
                         duration_s=self._duration,
+                        current_mouse_position=self._balloon_executor._current_mouse,
+                    )
+                    execution = self._balloon_executor.execute(
+                        self._balloon_frame_decision,
+                        execution_context,
+                        self._input_backend,
                     )
                     executor_ms = (now_monotonic() - executor_t0) * 1000.0
                     self._decision_console.execution(self._frame_count, execution)
@@ -1256,6 +1266,12 @@ def parse_args(argv=None):
         help="Balloon mode: bypass behavioral reaction/movement/click delays and dispatch input immediately",
     )
     parser.add_argument(
+        "--policy",
+        choices=["fast", "humanized"],
+        default=None,
+        help="Balloon execution policy (default: fast)",
+    )
+    parser.add_argument(
         "--verbose-decisions",
         action="store_true",
         help="Print compact human-readable detections, decisions, rejections, and executions",
@@ -1328,25 +1344,48 @@ def main():
         print("Verbose decisions: enabled")
     print()
 
+    explicit_policy = args.policy
+    if explicit_policy is not None:
+        policy_name = explicit_policy
+    elif args.fast:
+        policy_name = "fast"
+    elif (
+        settings.mode == RunMode.LIVE
+        and game_profile is not None
+        and game_profile.game_type == GameType.BALLOON_GAME
+    ):
+        policy_name = "fast"
+    else:
+        policy_name = "fast"
+
+    diagnostic = (
+        DownstreamDiagnostic()
+        if not args.no_diagnostics
+        and game_profile is not None
+        and game_profile.game_type == GameType.BALLOON_GAME
+        else None
+    )
+    if policy_name == "humanized":
+        execution_policy = HumanizedExecutionPolicy(diagnostic=diagnostic)
+    else:
+        execution_policy = FastExecutionPolicy(
+            clock=now_monotonic,
+            diagnostic=diagnostic,
+        )
+
+    print(f"[session] policy={policy_name}")
+
     app = Application(
         settings,
         game_profile=game_profile,
         duration=args.duration,
         startup_delay=args.startup_delay,
-        # Balloon gameplay is latency-sensitive; keep the humanized behavioral
-        # scheduler available for explicit non-balloon uses, but live balloon
-        # execution defaults to immediate dispatch. --fast remains accepted.
-        fast_execution=(
-            args.fast
-            or (
-                settings.mode == RunMode.LIVE
-                and game_profile is not None
-                and game_profile.game_type == GameType.BALLOON_GAME
-            )
-        ),
+        fast_execution=(policy_name == "fast"),
         diagnostics_enabled=not args.no_diagnostics,
         verbose_decisions=args.verbose_decisions,
         record_candidates=args.record_candidates,
+        execution_policy=execution_policy,
+        diagnostic=diagnostic,
     )
     app.run()
 
