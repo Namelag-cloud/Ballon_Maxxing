@@ -64,7 +64,7 @@ class ErrorConfig:
 @dataclass
 class WarmupConfig:
     enabled: bool = True
-    duration_s: float = 20.0
+    duration_s: float = 30.0
     modifier: float = 0.15
 
 
@@ -137,7 +137,7 @@ class HumanProfileConfig:
 
 @dataclass
 class BehaviorConfig:
-    enabled: bool = False
+    enabled: bool = True
     # None means entropy-seeded per session. An explicit value is retained as
     # a reproducible debug override and never represents the game seed.
     seed: int | None = None
@@ -161,7 +161,7 @@ class BehaviorConfig:
 
         seed = data.get("seed")
         return cls(
-            enabled=data.get("enabled", False),
+            enabled=data.get("enabled", True),
             seed=int(seed) if seed is not None else None,
             reaction_time=build(ReactionTimeConfig, "reaction_time"),
             movement=build(MovementConfig, "movement"),

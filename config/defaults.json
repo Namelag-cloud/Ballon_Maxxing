@@ -2,15 +2,75 @@
   "mode": "live",
   "capture": {
     "backend": "mss",
-    "region": {"top": 0, "left": 0, "width": 1920, "height": 1080},
+    "region": {
+      "top": 0,
+      "left": 0,
+      "width": 1920,
+      "height": 1080
+    },
     "fps_limit": null
   },
   "colors": {
-    "red": {"lower_hsv": [0, 120, 100], "upper_hsv": [10, 255, 255]},
-    "green": {"lower_hsv": [35, 120, 100], "upper_hsv": [85, 255, 255]},
-    "blue": {"lower_hsv": [100, 120, 100], "upper_hsv": [130, 255, 255]},
-    "yellow": {"lower_hsv": [20, 120, 100], "upper_hsv": [35, 255, 255]},
-    "white": {"lower_hsv": [0, 0, 200], "upper_hsv": [180, 30, 255]}
+    "red": {
+      "lower_hsv": [
+        0,
+        120,
+        100
+      ],
+      "upper_hsv": [
+        10,
+        255,
+        255
+      ]
+    },
+    "green": {
+      "lower_hsv": [
+        35,
+        120,
+        100
+      ],
+      "upper_hsv": [
+        85,
+        255,
+        255
+      ]
+    },
+    "blue": {
+      "lower_hsv": [
+        100,
+        120,
+        100
+      ],
+      "upper_hsv": [
+        130,
+        255,
+        255
+      ]
+    },
+    "yellow": {
+      "lower_hsv": [
+        20,
+        120,
+        100
+      ],
+      "upper_hsv": [
+        35,
+        255,
+        255
+      ]
+    },
+    "white": {
+      "lower_hsv": [
+        0,
+        0,
+        200
+      ],
+      "upper_hsv": [
+        180,
+        30,
+        255
+      ]
+    }
   },
   "detection": {
     "min_area": 500,
@@ -20,7 +80,7 @@
   },
   "outline": {
     "enabled": true,
-    "min_white_ratio": 0.10,
+    "min_white_ratio": 0.1,
     "min_contrast": 30,
     "border_sample_width": 10
   },
@@ -34,11 +94,6 @@
     "same_color_only": true,
     "require_outline": false,
     "max_pair_distance": 500
-  },
-  "rules": {
-    "click_white": false,
-    "min_size": 200,
-    "max_size": 30000
   },
   "input": {
     "backend": "sendinput",
@@ -77,7 +132,7 @@
     },
     "trajectory": {
       "enabled": true,
-      "lateral_deviation_px": 2.0,
+      "lateral_deviation_px": 2,
       "velocity_variance": 0.15,
       "endpoint_correction": true,
       "points": 20
@@ -111,7 +166,7 @@
       "enabled": true,
       "start_s": 300,
       "rate": 0.05,
-      "maximum": 0.30
+      "maximum": 0.3
     },
     "micro_pauses": {
       "enabled": true,
@@ -121,47 +176,47 @@
     },
     "endpoint_error": {
       "enabled": true,
-      "scale_px": 5.0,
-      "max_px": 12.0,
+      "scale_px": 5,
+      "max_px": 12,
       "spatial_sigma_pct": 0.16
     },
     "human_profile": {
       "enabled": true,
-      "reaction_mu_ticks_min": 12.0,
-      "reaction_mu_ticks_max": 32.0,
-      "spatial_sigma_pct_min": 0.10,
+      "reaction_mu_ticks_min": 12,
+      "reaction_mu_ticks_max": 32,
+      "spatial_sigma_pct_min": 0.1,
       "spatial_sigma_pct_max": 0.22,
       "miss_rate_min": 0.02,
       "miss_rate_max": 0.05,
       "notif_hit_rate_min": 0.005,
       "notif_hit_rate_max": 0.02,
-      "duo_delta_min_ms": 50.0,
-      "duo_delta_max_ms": 500.0,
-      "duo_delta_median_ms": 150.0,
+      "duo_delta_min_ms": 50,
+      "duo_delta_max_ms": 500,
+      "duo_delta_median_ms": 150,
       "super_g_fail_rate_min": 0.08,
       "super_g_fail_rate_max": 0.22,
       "balloon_g_abandon_rate_min": 0.05,
       "balloon_g_abandon_rate_max": 0.15,
       "idle_lambda_min": 0.03,
       "idle_lambda_max": 0.08,
-      "start_delay_min_s": 1.0,
-      "start_delay_max_s": 3.0,
-      "warmup_min_s": 15.0,
-      "warmup_max_s": 25.0,
+      "start_delay_min_s": 1,
+      "start_delay_max_s": 3,
+      "warmup_min_s": 15,
+      "warmup_max_s": 25,
       "fatigue_min_ticks_per_min": 0.5,
-      "fatigue_max_ticks_per_min": 2.0,
+      "fatigue_max_ticks_per_min": 2,
       "early_exit_prob_min": 0.05,
       "early_exit_prob_max": 0.15,
-      "early_exit_ratio_min": 0.80,
+      "early_exit_ratio_min": 0.8,
       "early_exit_ratio_max": 0.95,
       "reaction_sigma": 0.35,
-      "reaction_ar1": 0.30,
-      "perception_min_ticks": 2.0,
-      "perception_max_ticks": 5.0,
+      "reaction_ar1": 0.3,
+      "perception_min_ticks": 2,
+      "perception_max_ticks": 5,
       "duo_delta_sigma": 0.4,
       "duo_y_variance_multiplier": 1.5,
       "fat_finger_probability": 0.02,
-      "fat_finger_multiplier": 2.0,
+      "fat_finger_multiplier": 2,
       "gemini_without_notification_probability": 0.01,
       "final_activity_cutoff_s": 1.5
     }

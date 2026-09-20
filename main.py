@@ -33,9 +33,8 @@ import mss
 
 from config.settings import Settings, RunMode, load_settings
 from capture.mss_capture import MSSCapture
-from vision.pipeline import VisionPipeline
 from tracking.tracker import Tracker, BalloonTrack
-from decision.selector import TargetSelector, ClickAction
+from game_profiles.base import GameProfile, GameAction, GameType, ClickAction
 from input.sendinput import SendInputBackend
 from input.coordinates import frame_to_screen
 from telemetry.logger import TelemetryLogger, FrameTelemetry
@@ -48,11 +47,9 @@ from game_profiles import get_profile
 from game_profiles.balloon_types import BalloonAction, TwinAction
 from decision.mechanics import BalloonDecisionEngine
 from behavior.model import BehavioralModel
-from behavior.action_scheduler import ActionScheduler
 from behavior.balloon_executor import BalloonExecutor
 from behavior.execution_policy import ExecutionContext, ExecutionPolicy
 from behavior.fast_policy import FastExecutionPolicy
-from behavior.humanized_policy import HumanizedExecutionPolicy
 from diagnostics.downstream import DownstreamDiagnostic
 from diagnostics.decision_console import DecisionConsole
 from training.candidate_collector import CandidateCollector
@@ -161,9 +158,7 @@ class Application:
         self._game_profile = game_profile
 
         self._capture = MSSCapture(settings.capture)
-        self._vision = VisionPipeline(settings)
         self._tracker = Tracker(settings)
-        self._selector = TargetSelector(settings)
         self._verbose_decisions = verbose_decisions
         self._decision_console = DecisionConsole(verbose_decisions)
         self._diagnostic = diagnostic if diagnostic is not None else (
@@ -185,7 +180,6 @@ class Application:
         self._visualizer = DebugVisualizer(settings)
 
         self._behavior = None
-        self._action_scheduler = None
         self._balloon_decision = None
         self._balloon_executor = None
         self._balloon_frame_decision = None
@@ -196,7 +190,6 @@ class Application:
                 human_profile=self._behavior.profile.as_dict(),
                 feedback_signals="screen-only; unvalidated UI signals remain UNOBSERVABLE THROUGH CURRENT INTERFACE",
             )
-            self._action_scheduler = ActionScheduler()
             if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
                 self._balloon_executor = BalloonExecutor(
                     self._behavior,
@@ -417,23 +410,6 @@ class Application:
                 track = _game_detection_to_track(det, i)
                 tracks_dict[track.id] = track
             return detections, tracks_dict, click_actions, game_actions
-        else:
-            t0 = now_monotonic()
-            detections, _vision_internal_ms = self._vision.process(frame)
-            vision_ms = (now_monotonic() - t0) * 1000.0
-            t0 = now_monotonic()
-            tracks = self._tracker.update(detections)
-            tracking_ms = (now_monotonic() - t0) * 1000.0
-            t0 = now_monotonic()
-            click_actions = self._selector.select(tracks)
-            decision_ms = (now_monotonic() - t0) * 1000.0
-            self._last_frame_stage_timings = {
-                "feedback_ms": feedback_ms,
-                "vision_ms": vision_ms,
-                "tracking_ms": tracking_ms,
-                "decision_ms": decision_ms,
-            }
-            return detections, tracks, click_actions, None
 
     @staticmethod
     def _count_types(detections):
@@ -478,72 +454,6 @@ class Application:
         cutoff = self._behavior.activity_cutoff_s()
         deadline = None if not duration_s or duration_s <= 0 else duration_s - cutoff
         return {"session_started": self._behavior._session_started, "session_elapsed_s": elapsed, "start_delay_s": self._behavior.start_delay_s, "actions_ready": self._behavior.actions_ready(), "activity_cutoff_s": cutoff, "final_activity_deadline_s": deadline, "final_activity_cutoff_active": bool(deadline is not None and elapsed >= deadline)}
-
-    def _run_benchmark(self) -> None:
-        print("Running BENCHMARK mode - no mouse input, measuring raw pipeline speed")
-        if self._duration:
-            print(f"Running for {self._duration} seconds")
-        if self._game_profile:
-            print(f"Game profile: {self._game_profile.name}")
-        print("Press ESC to stop\n")
-        sys.stdout.flush()
-
-        durations: list[float] = []
-        frame_times: list[float] = []
-
-        try:
-            while self._running:
-                if self._duration and (now_monotonic() - self._start_time) >= self._duration:
-                    print(f"\nDuration limit reached ({self._duration}s)")
-                    break
-                t_start = now_monotonic()
-
-                frame, capture_ts = self._capture.grab()
-                t_after_capture = now_monotonic()
-
-                detections, tracks, actions, game_actions = self._process_frame(frame, capture_ts)
-                t_after_decision = now_monotonic()
-
-                self._frame_count += 1
-                self._fps_frame_count += 1
-                elapsed = now_monotonic() - self._fps_counter_start
-                if elapsed >= 1.0:
-                    self._current_fps = self._fps_frame_count / elapsed
-                    self._fps_frame_count = 0
-                    self._fps_counter_start = now_monotonic()
-
-                proc_ms = (t_after_decision - t_start) * 1000
-                e2e_ms = (t_after_decision - capture_ts) * 1000
-                durations.append(proc_ms)
-                frame_times.append(e2e_ms)
-
-                if self._frame_count % 100 == 0:
-                    print(
-                        f"Frame {self._frame_count:6d} | "
-                        f"FPS: {self._current_fps:6.1f} | "
-                        f"Proc: {proc_ms:6.2f}ms | "
-                        f"Detections: {len(detections)} | "
-                        f"Tracks: {len(tracks)}"
-                    )
-                    sys.stdout.flush()
-
-                if self._settings.debug.show_detections:
-                    vis = self._visualizer.render(
-                        frame, detections, tracks, actions,
-                        input_enabled=False, fps=self._current_fps,
-                    )
-                key = self._visualizer.show(vis)
-                if key == 27:
-                    if self._action_scheduler and not self._action_scheduler.is_idle:
-                        self._action_scheduler.cancel()
-                    self._running = False
-                    break
-
-        except KeyboardInterrupt:
-            if self._action_scheduler and not self._action_scheduler.is_idle:
-                self._action_scheduler.cancel()
-
-        self._print_benchmark_results(durations, frame_times)
 
     def _run_collect(self) -> None:
         if self._game_profile is None or self._game_profile.game_type != GameType.BALLOON_GAME:
@@ -1171,44 +1081,11 @@ class Application:
         dy = float(first[1]) - float(second[1])
         return (dx * dx + dy * dy) ** 0.5
 
-    def _print_benchmark_results(self, durations: list[float], frame_times: list[float]) -> None:
-        print("\n" + "=" * 60)
-        print("BENCHMARK RESULTS")
-        print("=" * 60)
-        print(f"Total frames:    {len(durations)}")
-        print(f"Total clicks:    {self._total_clicks}")
-
-        if durations:
-            arr = np.array(durations)
-            print(f"\nProcessing time (ms):")
-            print(f"  Mean:   {np.mean(arr):8.3f}")
-            print(f"  Median: {np.median(arr):8.3f}")
-            print(f"  Min:    {np.min(arr):8.3f}")
-            print(f"  Max:    {np.max(arr):8.3f}")
-            print(f"  P95:    {np.percentile(arr, 95):8.3f}")
-            print(f"  P99:    {np.percentile(arr, 99):8.3f}")
-            print(f"  Std:    {np.std(arr):8.3f}")
-
-        if frame_times:
-            arr_ft = np.array(frame_times)
-            print(f"\nEnd-to-end latency (ms):")
-            print(f"  Mean:   {np.mean(arr_ft):8.3f}")
-            print(f"  Median: {np.median(arr_ft):8.3f}")
-            print(f"  P95:    {np.percentile(arr_ft, 95):8.3f}")
-            print(f"  P99:    {np.percentile(arr_ft, 99):8.3f}")
-
-        if durations:
-            print(f"\nEstimated max FPS: {1000.0 / np.mean(arr):.1f}")
-
-        print("=" * 60)
-
     def run(self) -> None:
         hook_thread = threading.Thread(target=self._setup_hotkeys, daemon=True)
         hook_thread.start()
 
-        if self._mode == RunMode.BENCHMARK:
-            self._run_benchmark()
-        elif self._mode == RunMode.DRY_RUN:
+        if self._mode == RunMode.DRY_RUN:
             self._run_dry_run()
         elif self._mode == RunMode.LIVE:
             self._run_live()
@@ -1227,7 +1104,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Balloon Game Automation")
     parser.add_argument(
         "--mode",
-        choices=["benchmark", "dry-run", "live", "collect"],
+        choices=["dry-run", "live", "collect"],
         default=None,
         help="Run mode (overrides config file)",
     )
@@ -1264,24 +1141,13 @@ def parse_args(argv=None):
         "--duration",
         type=float,
         default=None,
-        help="Run for N seconds then stop (useful for benchmarking)",
+        help="Run for N seconds then stop",
     )
     parser.add_argument(
         "--startup-delay",
         type=float,
         default=3.0,
         help="Seconds to wait before starting collection/input (default: 3.0, 0 to disable)",
-    )
-    parser.add_argument(
-        "--fast",
-        action="store_true",
-        help="Balloon mode: bypass behavioral reaction/movement/click delays and dispatch input immediately",
-    )
-    parser.add_argument(
-        "--policy",
-        choices=["fast", "humanized"],
-        default=None,
-        help="Balloon execution policy (default: fast)",
     )
     parser.add_argument(
         "--verbose-decisions",
@@ -1303,19 +1169,6 @@ def parse_args(argv=None):
 
 
 
-def resolve_policy_name(args, settings: Settings, game_profile: Optional[GameProfile]) -> str:
-    """Resolve explicit policy > --fast > live-balloon auto-fast > fast default."""
-    if args.policy is not None:
-        return args.policy
-    if args.fast:
-        return "fast"
-    if (
-        settings.mode == RunMode.LIVE
-        and game_profile is not None
-        and game_profile.game_type == GameType.BALLOON_GAME
-    ):
-        return "fast"
-    return "fast"
 
 
 def main():
@@ -1326,9 +1179,9 @@ def main():
     if args.mode:
         settings.mode = RunMode(args.mode)
 
-    game_profile = None
-    if args.game:
-        game_profile = get_profile(args.game)
+    if args.game is None:
+        raise ValueError("--game is required")
+    game_profile = get_profile(args.game)
 
     if args.fullscreen:
         try:
@@ -1372,7 +1225,7 @@ def main():
         print("Verbose decisions: enabled")
     print()
 
-    policy_name = resolve_policy_name(args, settings, game_profile)
+    policy_name = "fast"
 
     diagnostic = (
         DownstreamDiagnostic()
@@ -1381,13 +1234,10 @@ def main():
         and game_profile.game_type == GameType.BALLOON_GAME
         else None
     )
-    if policy_name == "humanized":
-        execution_policy = HumanizedExecutionPolicy(diagnostic=diagnostic)
-    else:
-        execution_policy = FastExecutionPolicy(
-            clock=now_monotonic,
-            diagnostic=diagnostic,
-        )
+    execution_policy = FastExecutionPolicy(
+        clock=now_monotonic,
+        diagnostic=diagnostic,
+    )
 
     print(f"[session] policy={policy_name}")
 
@@ -1396,7 +1246,7 @@ def main():
         game_profile=game_profile,
         duration=args.duration,
         startup_delay=args.startup_delay,
-        fast_execution=(policy_name == "fast"),
+        fast_execution=True,
         diagnostics_enabled=not args.no_diagnostics,
         verbose_decisions=args.verbose_decisions,
         record_candidates=args.record_candidates,

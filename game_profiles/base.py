@@ -7,8 +7,17 @@ from typing import Optional
 
 import numpy as np
 
-from tracking.tracker import BalloonTrack
-from decision.selector import ClickAction
+
+
+@dataclass
+class ClickAction:
+    track_id: int
+    position: tuple[int, int]
+    color: str
+    confidence: float
+    reason: str
+    timestamp: float
+    metadata: Optional[dict] = None
 
 
 class GameType(Enum):

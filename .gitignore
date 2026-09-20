@@ -15,3 +15,7 @@ training/raw/*
 __pycache__/
 *.py[cod]
 *.class
+
+# Generated telemetry output
+telemetry_output/*
+!telemetry_output/.gitkeep
