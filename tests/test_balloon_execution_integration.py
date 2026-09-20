@@ -51,6 +51,7 @@ class FakeInput:
         self,
         first: tuple[int, int],
         second: tuple[int, int],
+        inter_click_delay_s: float = 0.0,
     ) -> tuple[float, float, float, float]:
         first_down = self.clock()
         second_down = first_down + self.pair_delta_s
