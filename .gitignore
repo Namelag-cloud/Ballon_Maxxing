@@ -10,3 +10,8 @@ training/dataset/test/*/*
 
 training/raw/*
 !training/raw/.gitkeep
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.class
