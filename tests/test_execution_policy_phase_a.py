@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import unittest
 from types import SimpleNamespace
 
@@ -112,6 +113,97 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         self.assertEqual(len(result.outcomes), 1)
         self.assertEqual(result.outcomes[0].target_first_seen_ts, 123.456)
         self.assertEqual(result.outcomes[0].actual_click_down_ts, 200.0)
+
+    def test_humanized_policy_dispatches_sampled_offset_at_os_input(self):
+        class FixedRNG:
+            def gauss(self, _mu, _sigma):
+                return 3.0 if not hasattr(self, "_called") else 4.0
+
+            def __init__(self):
+                self._called = False
+
+            def gauss(self, _mu, _sigma):
+                if not self._called:
+                    self._called = True
+                    return 3.0
+                return 4.0
+
+        policy = HumanizedExecutionPolicy(rng=FixedRNG())
+        action = balloon_action(
+            TargetType.NORMAL_BALLOON,
+            BalloonColor.BLUE,
+            (100, 100),
+            100,
+        )
+        decision = self.engine.decide([action])
+
+        result = policy.tick(decision, self._context(), self.input)
+
+        self.assertEqual(result.clicks_sent, 1)
+        self.assertEqual([(x, y) for _, x, y in self.input.moves], [(103, 104)])
+        self.assertEqual(self.input.downs, [0.0])
+
+    def test_humanized_policy_clips_offset_to_current_radius_with_margin(self):
+        class HugeRNG:
+            def gauss(self, _mu, _sigma):
+                return 100.0
+
+        policy = HumanizedExecutionPolicy(rng=HugeRNG())
+        action = balloon_action(
+            TargetType.NORMAL_BALLOON,
+            BalloonColor.BLUE,
+            (100, 100),
+            10,
+        )
+        decision = self.engine.decide([action])
+
+        result = policy.tick(decision, self._context(), self.input)
+
+        self.assertEqual(result.clicks_sent, 1)
+        x, y = self.input.moves[0][1:]
+        self.assertLessEqual(((x - 100) ** 2 + (y - 100) ** 2) ** 0.5, 4.0)
+
+    def test_humanized_policy_preserves_twin_dispatch_and_gives_each_target_own_offset(self):
+        class FixedRNG:
+            def __init__(self):
+                self.values = iter((2.0, 0.0, -2.0, 0.0))
+
+            def gauss(self, _mu, _sigma):
+                return next(self.values)
+
+        policy = HumanizedExecutionPolicy(rng=FixedRNG())
+        first = balloon_action(
+            TargetType.TWIN_BALLOON,
+            BalloonColor.YELLOW,
+            (100, 100),
+            40,
+        )
+        second = balloon_action(
+            TargetType.TWIN_BALLOON,
+            BalloonColor.YELLOW,
+            (200, 100),
+            40,
+        )
+        twin = __import__("game_profiles.balloon_types", fromlist=["TwinAction"]).TwinAction(
+            targets=(first, second),
+            max_click_delta_ms=30.0,
+        )
+        decision = self.engine.decide([])
+        decision = decision.__class__(
+            actions=(twin,),
+            g_action=None,
+            multicolor_specials=(),
+            notifications=(),
+            mode=decision.mode,
+            special_step=decision.special_step,
+        )
+
+        result = policy.tick(decision, self._context(), self.input)
+
+        self.assertEqual(result.clicks_sent, 2)
+        self.assertEqual([(x, y) for _, x, y in self.input.moves], [])
+        self.assertEqual(self.input.downs, [0.0, 0.0])
+        self.assertEqual(self.input.pairs[0][0:2], ((102, 100), (198, 100)))
 
     def test_executor_uses_injected_humanized_policy_without_fallback(self):
         executor = BalloonExecutor(
