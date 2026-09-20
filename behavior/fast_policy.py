@@ -170,7 +170,7 @@ class FastExecutionPolicy:
                     context.region_top,
                 )
                 if dispatched_primary_actions:
-                    time.sleep(self._sequential_gap_s(action))
+                    time.sleep(self._sequential_gap_s(first))
 
                 first_behavior = self._fast_behavioral_action(
                     first_xy,
