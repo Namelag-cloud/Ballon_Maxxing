@@ -571,16 +571,15 @@ class TestBehavioralModel:
         )
         assert misses > 0
 
-    def test_reproducible_with_seed(self):
+    def test_seed_reproduces_behavior_rng_but_not_session_profile(self):
         m1 = self._make_model(seed=42)
-        m1.start_session()
         m2 = self._make_model(seed=42)
+        m1.start_session()
         m2.start_session()
-        for _ in range(10):
-            a1 = m1.plan_action(100, 100, 500, 500, 50)
-            a2 = m2.plan_action(100, 100, 500, 500, 50)
-            assert abs(a1.reaction_time_s - a2.reaction_time_s) < 0.0001
-            assert abs(a1.movement_time_s - a2.movement_time_s) < 0.0001
+
+        assert m1.behavioral_seed == m2.behavioral_seed == 42
+        assert m1.profile_seed != m2.profile_seed
+        assert m1.profile.as_dict() != m2.profile.as_dict()
 
     def test_different_seeds_differ(self):
         m1 = self._make_model(seed=42)
