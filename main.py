@@ -193,9 +193,12 @@ class Application:
             self._behavior = BehavioralModel(settings.behavior)
             self._telemetry.set_session_metadata(
                 behavioral_seed=self._behavior.behavioral_seed,
+                profile_seed=self._behavior.profile_seed,
                 human_profile=self._behavior.profile.as_dict(),
                 feedback_signals="screen-only; unvalidated UI signals remain UNOBSERVABLE THROUGH CURRENT INTERFACE",
             )
+            if execution_policy is not None and hasattr(execution_policy, "set_profile"):
+                execution_policy.set_profile(self._behavior.profile)
             self._action_scheduler = ActionScheduler()
             if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
                 self._balloon_executor = BalloonExecutor(
