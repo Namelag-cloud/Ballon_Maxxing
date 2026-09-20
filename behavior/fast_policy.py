@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import time
 
-SEQUENTIAL_CLICK_GAP_S = 0.040
-
 from behavior.action_scheduler import ActionTimestamps, TwinActionCompletion
 from behavior.model import BehavioralAction
 from diagnostics.downstream import DownstreamDiagnostic
@@ -11,6 +9,8 @@ from game_profiles.balloon_types import BalloonAction, TwinAction
 from input.coordinates import frame_to_screen
 from telemetry.outcome import SessionOutcome
 from telemetry.timing import now_monotonic
+
+SEQUENTIAL_CLICK_GAP_S = 0.040
 
 from .execution_policy import (
     BalloonExecutionResult,
@@ -121,8 +121,6 @@ class FastExecutionPolicy:
             # The vision/decision layer can surface several visible targets in
             # the same frame. Dispatch them as a rapid human-like sequence
             # rather than issuing one uninterrupted burst of clicks.
-            if dispatched_primary_actions:
-                time.sleep(SEQUENTIAL_CLICK_GAP_S)
             if isinstance(action, TwinAction):
                 first, second = action.targets
                 pair_ids = (first.target_id, second.target_id)
@@ -142,6 +140,9 @@ class FastExecutionPolicy:
                     context.region_left,
                     context.region_top,
                 )
+                if dispatched_primary_actions:
+                    time.sleep(SEQUENTIAL_CLICK_GAP_S)
+
                 first_behavior = self._fast_behavioral_action(
                     first_xy,
                     first.target_width,
@@ -228,6 +229,9 @@ class FastExecutionPolicy:
                         reason="recent_normal_target_click",
                     )
                 continue
+
+            if dispatched_primary_actions:
+                time.sleep(SEQUENTIAL_CLICK_GAP_S)
 
             screen_xy = self._to_screen(
                 action.position,
