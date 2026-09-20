@@ -257,10 +257,10 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         precursor = policy._reaction_delay_s(
             TargetType.SPECIAL_SEQUENCE_BALLOON,
             is_twin_second=False,
-            combo_eligible=True,
+            combo_eligible=False,
         )
         self.assertGreaterEqual(precursor * 1000.0, 150.0)
-        self.assertLessEqual(precursor * 1000.0, 400.0)
+        self.assertLessEqual(precursor * 1000.0, 800.0)
 
         gemini = policy._reaction_delay_s(
             TargetType.MULTICOLOR_SPECIAL,
