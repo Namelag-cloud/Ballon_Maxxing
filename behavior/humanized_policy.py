@@ -41,7 +41,7 @@ class _DelayedTwinInputBackend:
         second: tuple[int, int],
         inter_click_delay_s: float = 0.0,
     ) -> tuple[float, float, float, float]:
-        first_move = self._backend.move_to(*first)
+        self._backend.move_to(*first)
         first_down = self._backend.left_down()
         first_up = self._backend.left_up()
         time.sleep(self._inter_click_delay_s)
