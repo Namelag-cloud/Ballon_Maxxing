@@ -73,16 +73,16 @@ class TestBehavioralReplayValidation(unittest.TestCase):
     def test_fat_finger_event_scales_endpoint_noise(self):
         from behavior.config import EndpointErrorConfig
         profile = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=1.0, fat_finger_multiplier=2.0)
-        cfg = BehaviorConfig(enabled=True, seed=9, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=profile)
+        cfg = BehaviorConfig(enabled=True, seed=9, endpoint_error=EndpointErrorConfig(enabled=False, max_px=100.0, max_radius_fraction=1.0), human_profile=profile)
         fat = BehavioralModel(cfg).plan_action(0, 0, 100, 100, 40)
         normal_profile = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, fat_finger_multiplier=2.0)
-        normal = BehavioralModel(BehaviorConfig(enabled=True, seed=9, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=normal_profile)).plan_action(0, 0, 100, 100, 40)
+        normal = BehavioralModel(BehaviorConfig(enabled=True, seed=9, endpoint_error=EndpointErrorConfig(enabled=False, max_px=100.0, max_radius_fraction=1.0), human_profile=normal_profile)).plan_action(0, 0, 100, 100, 40)
         self.assertAlmostEqual(fat.endpoint_error_px, normal.endpoint_error_px * 2.0, places=6)
 
     def test_duo_y_variance_multiplier(self):
         from behavior.config import EndpointErrorConfig
-        base = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, duo_y_variance_multiplier=1.0)
-        duo = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, duo_y_variance_multiplier=2.0)
+        base = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, duo_y_variance_multiplier=1.0, miss_rate_min=0.0, miss_rate_max=0.0)
+        duo = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, duo_y_variance_multiplier=2.0, miss_rate_min=0.0, miss_rate_max=0.0)
         a = BehavioralModel(BehaviorConfig(enabled=True, seed=11, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=base)).plan_action(0,0,100,100,40,target_metadata={"is_twin":False})
         b = BehavioralModel(BehaviorConfig(enabled=True, seed=11, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=duo)).plan_action(0,0,100,100,40,target_metadata={"is_twin":True})
         self.assertAlmostEqual(b.click_position[0] - 100.0, a.click_position[0] - 100.0, places=6)
@@ -186,7 +186,8 @@ class TestBehavioralReplayValidation(unittest.TestCase):
         a = BehavioralModel(cfg)
         b = BehavioralModel(cfg)
         self.assertEqual(a.behavioral_seed, b.behavioral_seed)
-        self.assertEqual(a.profile.as_dict(), b.profile.as_dict())
+        self.assertNotEqual(a.profile_seed, b.profile_seed)
+        self.assertNotEqual(a.profile.as_dict(), b.profile.as_dict())
 
     def test_miss_endpoint_is_outside_target_radius(self):
         cfg = BehaviorConfig(
