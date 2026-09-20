@@ -1,32 +1,10 @@
 # Google_Max
 
-A screen-only computer-vision automation system for the timed balloon game.
+A screen-only computer-vision bot for a 60-second browser balloon game.
 
-`Google_Max` observes the game through the rendered screen, identifies game objects using OpenCV-based vision (with an optional local ML semantic classifier), tracks targets across frames, applies game-specific mechanics, schedules clicks, and sends Windows mouse input through `SendInput`.
+Google_Max watches the game through the rendered screen, identifies targets, tracks them across frames, understands game-specific mechanics, and sends Windows mouse input to play the game.
 
-The system deliberately does **not** depend on DOM access, browser automation APIs, CDP, network traffic, JavaScript injection, or authoritative game state.
-
----
-
-## What It Does
-
-The primary target is a 60-second browser balloon game containing:
-
-- Normal colored balloons
-  - Blue
-  - Red
-  - Yellow
-  - Green
-- Twin / Golden Duo balloons
-- A four-color special sequence
-- The G-symbol
-- Gemini / multicolor special
-- White notification objects
-- Static UI elements that visually resemble targets
-
-The bot is designed as a perception → tracking → mechanics → behavior → input pipeline rather than as a monolithic "find something and click it" script.
-
-The important architectural boundary is:
+The core pipeline is:
 
 ```text
 Screen
@@ -35,12 +13,11 @@ Screen
 MSS Capture
   │
   ▼
-Vision / Candidate Generation
+Vision
   │
-  ├── OpenCV color + geometry
-  ├── outline / border evidence
-  ├── ring detection
-  ├── G-symbol detection
+  ├── OpenCV spatial detection
+  ├── geometry filtering
+  ├── outline / ring detection
   └── optional MobileNet semantic classification
   │
   ▼
@@ -54,462 +31,315 @@ Game Mechanics / Decision Engine
   │
   ├── normal balloons
   ├── Twin / Golden Duo
-  ├── four-color special sequence
-  ├── Super-G state
-  ├── G-symbol lane
-  └── Gemini / notification relationship
+  ├── four-color sequence
+  ├── Super-G / G-symbol
+  └── Gemini / multicolor special
   │
   ▼
-Execution Policy
-  │
-  ├── Fast execution
-  └── experimental humanized policy
+Fast Execution Policy
   │
   ▼
-Balloon Executor / Scheduler
+Balloon Executor
   │
   ▼
 Windows SendInput
 ```
 
-Telemetry and diagnostics run alongside the pipeline rather than controlling game state.
+The project is intentionally **screen-only**. It plays from what is visible on screen rather than reading the game's DOM, JavaScript state, network traffic, game seed, or internal engine state.
 
 ---
 
-# Design Principles
+## What It Does
 
-### Screen-only
+Google_Max currently targets a browser balloon game with:
 
-The bot only knows what can be inferred from pixels and its own history.
+- Blue balloons
+- Red balloons
+- Yellow balloons
+- Green balloons
+- Twin / Golden Duo targets
+- A four-color special sequence
+- G-symbol / Super-G mechanics
+- Gemini / multicolor specials
+- White notification objects
+- Static UI elements that can resemble balloons
 
-It does not receive:
+The system is built around the idea that **perception and gameplay logic are different problems**.
 
-- spawn ticks
-- pop ticks
-- authoritative hit state
-- server state
-- game seed
-- DOM state
-- browser event state
+Vision determines what appears to be on screen.
 
-Where a quantity cannot be observed from the current interface, the code intentionally records it as unavailable rather than pretending it knows the answer.
+Tracking determines which detections belong to the same object over time.
 
-### Separate perception from mechanics
+The decision engine determines what those observations mean for the current game state.
 
-Vision answers:
+The execution layer turns those decisions into mouse actions.
 
-> "What appears to be on screen?"
+---
 
-The decision layer answers:
+# Why I Built This
 
-> "Given what we can currently see, what should be clicked?"
+The first version of Google_Max started with handwritten computer-vision heuristics.
 
-This distinction is particularly important for the four-color sequence, Twin/Gemini behavior, and Super-G state.
+That worked surprisingly well for obvious balloons.
 
-### Cheap tests before expensive tests
+The problem was the edge cases.
 
-The balloon detector progressively filters candidates:
+Objects such as UI digits and other looped shapes could look remarkably similar to balloons when all the system knew about them was color, area, and geometry. Digits such as `0`, `3`, `6`, `8`, and `9` repeatedly exposed the limits of increasingly complicated heuristic rules.
+
+So the project evolved from:
 
 ```text
-HSV mask
-→ morphology
-→ connected components
-→ area / aspect / fill gates
-→ score-UI guard
-→ contour geometry
-→ circularity / solidity
-→ color confidence
-→ semantic classification
+"Does this shape look like a balloon?"
 ```
 
-More expensive operations such as Hough-circle ring detection are restricted to candidates that have already passed cheaper tests.
-
-### State belongs downstream
-
-The vision profile does not decide gameplay priority.
-
-For example, detecting all four special-sequence colors does not itself cause clicks in the required order. The decision engine owns that state machine.
-
----
-
-# Repository Structure
+toward:
 
 ```text
-Google_Max/
-│
-├── main.py
-│
-├── analysis/
-│   ├── behavior_validation.py
-│   ├── calibration_plan.py
-│   └── replay_validation.py
-│
-├── behavior/
-│   ├── action_scheduler.py
-│   ├── balloon_executor.py
-│   ├── config.py
-│   ├── distributions.py
-│   ├── execution_policy.py
-│   ├── fast_policy.py
-│   ├── humanized_policy.py
-│   ├── model.py
-│   ├── movement.py
-│   ├── profile.py
-│   └── scheduler.py
-│
-├── capture/
-│   ├── base.py
-│   └── mss_capture.py
-│
-├── config/
-│   ├── defaults.json
-│   └── settings.py
-│
-├── debug/
-│   └── visualizer.py
-│
-├── decision/
-│   ├── grouping.py
-│   ├── mechanics.py
-│   ├── rules.py
-│   └── selector.py
-│
-├── diagnostics/
-│   ├── decision_console.py
-│   └── downstream.py
-│
-├── game_profiles/
-│   ├── base.py
-│   ├── balloon_game.py
-│   ├── balloon_types.py
-│   ├── cookie_clicker.py
-│   └── ml_balloon_game.py
-│
-├── input/
-│   ├── base.py
-│   ├── coordinates.py
-│   └── sendinput.py
-│
-├── telemetry/
-│   ├── behavioral.py
-│   ├── logger.py
-│   ├── outcome.py
-│   └── timing.py
-│
-├── tests/
-│
-├── tracking/
-│   └── tracker.py
-│
-├── training/
-│   ├── candidate_collector.py
-│   ├── dataset_split.py
-│   ├── dataset_stats.py
-│   ├── label_candidates.py
-│   ├── train.py
-│   ├── train_classifier.py
-│   ├── benchmark_classifier.py
-│   ├── README.md
-│   └── dataset/
-│
-├── vision/
-│   ├── color_classifier.py
-│   ├── detector.py
-│   ├── feedback.py
-│   ├── g_symbol_detector.py
-│   ├── ml_classifier.py
-│   ├── outline_detector.py
-│   ├── pipeline.py
-│   └── ring_detector.py
-│
-├── benchmark_behavior.py
-├── benchmark_stages.py
-└── requirements.txt
+"Does this candidate actually belong to one of the semantic classes
+I care about?"
+```
+
+That led to the current hybrid vision system: cheap OpenCV-based candidate generation followed by optional local ML classification.
+
+The handwritten vision is still valuable because it handles the inexpensive spatial filtering before the classifier ever sees a candidate.
+
+---
+
+# Architecture
+
+## Capture
+
+`capture/mss_capture.py`
+
+The game is captured directly from the screen using [MSS](https://python-mss.readthedocs.io/).
+
+Frames flow into the rest of the system as image data plus capture timestamps.
+
+Fullscreen mode can use the primary monitor reported by MSS:
+
+```powershell
+python main.py --mode live --game balloons --fullscreen --duration 60
+```
+
+Coordinate conversion is kept separate from perception in:
+
+```text
+input/coordinates.py
 ```
 
 ---
 
-# Runtime Pipeline
+## Vision
 
-## 1. Capture
-
-`capture/mss_capture.py` uses [MSS](https://python-mss.readthedocs.io/) to capture a configured screen region.
-
-Frames are returned as:
-
-```python
-(bgr_numpy_array, monotonic_timestamp)
-```
-
-The default configuration targets a 1920×1080 region, while `--fullscreen` dynamically uses the primary monitor reported by MSS.
-
-Coordinate conversion is handled separately in `input/coordinates.py`.
-
----
-
-## 2. Vision
-
-The main balloon profile lives in:
+The balloon game's primary vision profile lives in:
 
 ```text
 game_profiles/balloon_game.py
 ```
 
-It performs significantly more than generic color segmentation.
+Candidate generation is deliberately multi-stage.
 
-### Color segmentation
+A simplified version of the process is:
 
-The four balloon colors are represented by HSV ranges.
+```text
+HSV color masks
+      ↓
+morphology
+      ↓
+connected components
+      ↓
+area / aspect / fill filtering
+      ↓
+static UI guards
+      ↓
+contour geometry
+      ↓
+circularity / solidity
+      ↓
+color confidence
+      ↓
+optional ML classification
+```
 
-OpenCV connected components provide:
+This lets the cheap operations eliminate most irrelevant pixels before more expensive analysis is performed.
 
-- bounding box
+### Geometry
+
+Candidates are evaluated using features including:
+
 - area
-- center
-- component geometry
-
-### Geometry filtering
-
-Candidates are rejected using several shape constraints, including:
-
-- minimum/maximum area
 - aspect ratio
 - fill ratio
-- circularity
+- contour circularity
 - solidity
 - boundary radial consistency
-- enclosed-hole ratio
+- enclosed-hole characteristics
 
-This is important because arbitrary colored UI elements can satisfy a simple hue threshold.
+This matters because color alone is nowhere near enough to distinguish a balloon from arbitrary UI.
 
-### White objects
+### Static UI
 
-White objects are handled separately.
+The game contains UI elements that can visually resemble targets.
 
-A white candidate must satisfy geometric constraints and additional halo evidence before becoming a notification detection.
+The vision system contains explicit score-counter protection, while the tracker builds additional temporal evidence for objects that remain stationary.
 
-Notifications are explicitly non-actionable.
-
-### Static UI rejection
-
-The known score-counter region receives an explicit geometry guard.
-
-The tracker additionally builds temporal evidence for persistent static objects. A target that remains nearly motionless for enough frames can be marked:
+Persistent objects can become:
 
 ```text
 static_ui_suspect = true
 ```
 
-The decision layer can then refuse to click it.
-
-Repeated click attempts on persistent normal-balloon false positives also create a temporary spatial suppression region.
+and the decision layer can refuse to treat them as actionable balloons.
 
 ---
 
-# Special Visual Detectors
+# Special Vision
 
-## Outline detection
+Several game mechanics require more than ordinary balloon detection.
+
+## Outline Detection
 
 `vision/outline_detector.py`
 
-Some game objects have a whitish/translucent boundary.
+Some targets have a whitish or translucent boundary.
 
-The detector measures:
+The detector examines:
 
 - white-pixel ratio around the candidate
-- contrast between the candidate interior and surrounding region
+- contrast between the candidate and its surrounding region
 
-This provides a visual feature rather than directly deciding game semantics.
+This produces visual evidence that downstream game logic can use.
 
 ---
 
-## Ring detection
+## Ring Detection
 
 `vision/ring_detector.py`
 
-The large special balloons use a large circular outline.
+Some special targets contain a large circular ring.
 
-Ring detection is intentionally expensive, so it is not run blindly across every candidate.
+Ring detection uses:
 
-It uses:
-
-1. candidate-relative crop
+1. candidate-relative cropping
 2. grayscale conversion
 3. Gaussian blur
-4. Hough circle detection
+4. Hough-circle detection
 5. Canny edge support
-6. center-distance validation
-7. radius-to-balloon ratio
+6. center validation
+7. radius-to-target relationships
 8. confidence scoring
 
-The ring radius is expressed relative to the detected balloon rather than as an absolute screen size.
+The detector is deliberately restricted to plausible candidates rather than running expensive Hough analysis across the entire frame.
 
 ---
 
-## G-symbol detection
+## G-Symbol Detection
 
 `vision/g_symbol_detector.py`
 
-The large Google-style G is detected using its multicolor spatial structure.
+The G-symbol is identified through its multicolor structure rather than relying on the white center.
 
-The detector looks for the arrangement of:
+The detector looks for the characteristic arrangement of:
 
 - red
 - green
 - blue
-- optional yellow
+- yellow where applicable
 
-rather than relying on the white center or click counter.
-
-The blue horizontal bar is used as the click location because it provides a reliable colored click surface.
+The blue horizontal section provides the click location.
 
 ---
 
-# Game Mechanics
+# Machine Learning Vision
 
-Game-specific semantic state is represented in:
+Google_Max contains a local semantic classifier based on:
+
+**MobileNetV3-Small**
+
+with:
 
 ```text
-game_profiles/balloon_types.py
-decision/mechanics.py
+Input:       96 × 96 RGB
+Device:      CPU
+Framework:   PyTorch / torchvision
+Runtime:     batched inference
 ```
 
-Target types include:
+The classifier currently recognizes:
 
 ```text
-normal_balloon
-twin_balloon
-special_sequence_balloon
-g_symbol
-multicolor_special
+balloon
+duo
 notification
-invalid_white
+super_g_ring
+ui
 ```
 
----
-
-## Normal balloons
-
-Normal balloons are independently actionable unless rejected by safety/temporal rules.
-
-The decision engine ignores:
-
-- invalid white objects
-- persistent static UI suspects
-- normal targets that have already accumulated enough click attempts
-
-The latter prevents repeatedly hammering a persistent false positive forever.
-
-Twin/Gemini targets use separate semantics and are not subject to the normal-balloon suppression lane.
-
----
-
-# Twin / Golden Duo
-
-Two same-color special balloons can form a Twin/Gemini-style pair.
-
-The perception layer assigns the pair a shared semantic ID.
-
-The decision engine only constructs a `TwinAction` when:
-
-- exactly two relevant twin detections are present
-- both share the same semantic pair ID
-- both have usable coordinates
-
-The executor then handles the two targets as a coordinated action rather than as unrelated normal balloons.
-
-The timing constraint is represented explicitly as:
-
-```python
-max_click_delta_ms
-```
-
-The current decision contract uses a 750 ms upper bound, while the execution policy applies its own configured inter-click timing.
-
----
-
-# Four-Color Special Sequence
-
-The special sequence is:
+The runtime pipeline is:
 
 ```text
-BLUE → RED → YELLOW → GREEN
+MSS
+  ↓
+OpenCV candidate generation
+  ↓
+96×96 candidate crops
+  ↓
+MobileNetV3-Small
+  ↓
+semantic class + confidence
+  ↓
+existing tracker
+  ↓
+existing decision engine
+  ↓
+existing execution system
 ```
 
-The decision engine does not arm the sequence from a partial observation.
+The classifier does not replace the rest of the architecture. It plugs into the existing perception pipeline after spatial candidate extraction.
 
-All four required colors must be observed in the same semantic observation before the one-shot sequence is armed.
+Runtime preprocessing uses OpenCV/NumPy rather than PIL transforms to keep the click-critical path lightweight.
 
-Once armed:
+### Runtime configuration
+
+The known working ML configuration is:
+
+```powershell
+$env:GOOGLE_MAX_ML_VISION="1"
+$env:GOOGLE_MAX_ML_CHECKPOINT="training/artifacts/mobilenet_v3_small.pt"
+$env:GOOGLE_MAX_ML_THRESHOLD="0.70"
+$env:GOOGLE_MAX_ML_BATCH_SIZE="16"
+
+python main.py --mode live --game balloons --fullscreen --duration 60 --no-gui --verbose-decisions
+```
+
+The important controls are:
 
 ```text
-normal actions
-twins
-other primary targets
+GOOGLE_MAX_ML_VISION
+GOOGLE_MAX_ML_CHECKPOINT
+GOOGLE_MAX_ML_THRESHOLD
+GOOGLE_MAX_ML_BATCH_SIZE
 ```
 
-do not consume the primary lane until the required special step is completed.
-
-After:
+The default checkpoint path is:
 
 ```text
-BLUE
-RED
-YELLOW
-GREEN
+training/artifacts/mobilenet_v3_small.pt
 ```
 
-the state returns to normal play and the engine marks the system as ready for the next Super-G stage.
-
----
-
-# Super-G
-
-Super-G state is deliberately separated from the ordinary G-symbol state.
-
-The balloon vision profile looks for a newly appearing cohort containing:
-
-```text
-blue + red + yellow + green
-```
-
-and validates the corresponding large rings.
-
-The expensive ring detector is therefore restricted to the small set of candidates that can plausibly form the four-node cohort.
-
-Once the precursor sequence completes, the next appropriate G-labelled special target is promoted into the independent G execution lane.
-
----
-
-# Gemini / Multicolor Special
-
-Gemini is represented internally as:
-
-```text
-TargetType.MULTICOLOR_SPECIAL
-```
-
-The current screen-based detector uses a deliberately conservative source-grounded rule:
-
-- at least two notification detections
-- colorful connected component
-- plausible size
-- plausible aspect ratio
-- sufficient multicolor score
-
-The detector returns at most one Gemini candidate.
-
-The decision engine treats notification presence as an observable precondition for executable Gemini behavior.
-
-The system does not claim to know the authoritative engine state behind the notification/Gemini relationship.
+Training artifacts and raw image data are kept outside the normal source tree.
 
 ---
 
 # Tracking
 
-`tracking/tracker.py` provides temporal identity.
+`tracking/tracker.py`
 
-Each `BalloonTrack` stores:
+Vision produces observations frame by frame.
+
+Tracking gives those observations temporal identity.
+
+A track stores information such as:
 
 - track ID
 - position
@@ -522,89 +352,220 @@ Each `BalloonTrack` stores:
 - click-attempt count
 - displacement statistics
 - stationary-frame count
-- maximum bounding-box change
 - semantic metadata
 
-Matching is currently spatial and class-aware:
+Matching is spatial and class-aware.
 
-```text
-existing track
-      │
-      ├── same tracking class
-      └── within max_distance
-             │
-             ▼
-         matched track
-```
-
-Expired tracks are removed after the configured missing-frame budget.
-
-Temporal state is particularly important for distinguishing moving game objects from persistent UI.
+This temporal layer is especially important for distinguishing actual game objects from persistent screen UI.
 
 ---
 
-# Decision Layer
+# Game Mechanics
 
-`decision/mechanics.py` owns game state.
+The decision system lives primarily in:
 
-The decision engine receives structured observations and produces:
-
-```python
-DecisionResult(
-    actions=...,
-    g_action=...,
-    multicolor_specials=...,
-    notifications=...,
-    mode=...,
-    special_step=...,
-)
+```text
+decision/mechanics.py
+game_profiles/balloon_types.py
 ```
 
-This gives the runtime separate lanes for:
+The main target types include:
 
-- primary actions
-- G actions
-- Gemini observations
-- notifications
-- special-sequence state
+```text
+normal_balloon
+twin_balloon
+special_sequence_balloon
+g_symbol
+multicolor_special
+notification
+invalid_white
+```
 
-The decision layer intentionally does not send mouse input.
+The decision engine receives structured observations and produces actions.
+
+It does **not** directly send mouse input.
+
+That separation makes it possible to inspect what the system thinks should happen before allowing it to actually click.
+
+---
+
+# Normal Balloons
+
+Normal balloons form the primary action lane.
+
+The decision engine filters out objects that should not be clicked, including:
+
+- invalid white objects
+- persistent static-UI suspects
+- targets that have accumulated excessive click attempts
+
+The last mechanism is particularly useful against persistent false positives: once an object repeatedly survives perception while refusing to disappear, the system stops hammering the same location indefinitely.
+
+---
+
+# Twin / Golden Duo
+
+Twin targets are handled as a coordinated action rather than two unrelated balloons.
+
+The perception and grouping system identifies related same-color targets and associates them with a shared semantic identity.
+
+The decision layer produces a:
+
+```python
+TwinAction
+```
+
+when the required pair is present.
+
+The execution layer then handles the pair using its own inter-click timing configuration.
+
+The timing constraint is represented explicitly in the action model rather than being hidden inside arbitrary mouse logic.
+
+---
+
+# Four-Color Special Sequence
+
+The special sequence is:
+
+```text
+BLUE → RED → YELLOW → GREEN
+```
+
+The decision engine owns this state machine.
+
+The system does not trigger the sequence merely because one or two required colors appear.
+
+The required special targets must be observed together before the sequence is armed.
+
+Once active, the decision layer prioritizes the required color in order:
+
+```text
+BLUE
+  ↓
+RED
+  ↓
+YELLOW
+  ↓
+GREEN
+```
+
+After the sequence completes, the engine returns to normal play.
+
+This state belongs in the decision layer rather than in the vision detector because recognizing a color and knowing **when that color is the next required action** are different problems.
+
+---
+
+# Super-G / G-Symbol
+
+Super-G has its own state rather than being treated as an ordinary balloon.
+
+The vision system can identify a newly appearing cohort containing:
+
+```text
+blue + red + yellow + green
+```
+
+and use the corresponding ring evidence to validate the special state.
+
+The G-symbol itself is handled independently through its multicolor structure.
+
+This keeps the expensive special-target logic focused on candidates that can plausibly belong to the mechanic.
+
+---
+
+# Gemini / Multicolor Special
+
+Gemini is represented internally as:
+
+```text
+TargetType.MULTICOLOR_SPECIAL
+```
+
+The current screen-based logic uses observable visual evidence rather than claiming access to hidden game state.
+
+Its detection can use:
+
+- notification presence
+- colorful connected components
+- plausible size
+- aspect ratio
+- fill characteristics
+- multicolor evidence
+
+The system can therefore reason about the Gemini mechanic from what is actually visible on screen while keeping authoritative game state outside the model.
 
 ---
 
 # Execution
 
-The execution layer lives under `behavior/`.
+The current production execution path is:
 
-The current runtime uses the fast policy by default.
+```text
+behavior/fast_policy.py
+```
 
-## Fast execution
+The fast policy is designed for the click-critical path.
 
-`behavior/fast_policy.py`
+It avoids unnecessary behavioral scheduling overhead while still applying configured timing and endpoint variation.
 
-Fast execution bypasses the long behavioral reaction/movement/click-duration scheduler.
-
-It still applies configured inter-click timing and small endpoint offsets.
-
-Different action categories have different timing ranges, including:
+Different action categories have their own timing ranges, including:
 
 - normal clicks
 - G precursors
 - Super-G
-- multicolor special
-- twins
+- multicolor specials
+- Twin actions
 
-This is why "fast" does not mean "click everything in a zero-delay loop."
+Normal clicks also use a small configurable endpoint offset rather than repeatedly clicking the exact same pixel.
 
-It means the behavioral scheduling overhead is removed from the click-critical path.
+The result is fast execution without reducing the system to a naive:
+
+```python
+click_everything_as_fast_as_possible()
+```
+
+loop.
+
+---
+
+# Windows Input
+
+`input/sendinput.py`
+
+Mouse input is sent through the Windows `SendInput` API.
+
+The coordinate path is:
+
+```text
+frame coordinates
+      ↓
+capture-region coordinates
+      ↓
+screen coordinates
+      ↓
+virtual-screen normalization
+      ↓
+Windows SendInput
+```
+
+`input/coordinates.py` owns the coordinate conversion.
+
+The application also configures Windows DPI awareness at startup so screen-coordinate mapping is less vulnerable to scaling differences.
 
 ---
 
 # Behavioral Model
 
-The repository also contains a stochastic behavioral model.
+The repository contains a stochastic behavioral model in:
 
-`behavior/model.py` can model:
+```text
+behavior/model.py
+behavior/profile.py
+behavior/movement.py
+behavior/distributions.py
+```
+
+The model can represent:
 
 - reaction time
 - perception delay
@@ -619,134 +580,70 @@ The repository also contains a stochastic behavioral model.
 - fatigue
 - micro-pauses
 - idle gaps
-- Duo timing
+- Twin timing
 - Super-G failures
-- notification clicks
+- notification interactions
 - early session exit
 
-A session receives an entropy-derived seed unless an explicit debug seed is configured.
+Behavioral parameters are sampled per session using an entropy-derived seed unless an explicit debug seed is configured.
 
-The sampled human profile is stored in telemetry so a session's modeled parameters can be reconstructed.
+The important distinction is that this is a **human-oriented behavioral model**, not a claim that the parameters constitute a scientifically validated model of human behavior.
 
-### Important
-
-The behavioral model is **not a learned human model**.
-
-`behavior/profile.py` explicitly describes its defaults as provisional model parameters rather than measurements of a human population.
-
-The current `HumanizedExecutionPolicy` interface exists, but its `tick()` and `shutdown()` methods currently raise `NotImplementedError`. The implemented production execution path is the fast policy.
+The current live path uses the fast execution policy.
 
 ---
 
-# Input
+# Training the Vision Model
 
-`input/sendinput.py` uses the Windows `SendInput` API.
-
-The coordinate path is:
+Training infrastructure lives under:
 
 ```text
-frame coordinates
-      ↓
-capture-region coordinates
-      ↓
-screen coordinates
-      ↓
-virtual-screen normalization
-      ↓
-SendInput
+training/
 ```
 
-`input/coordinates.py` contains the conversion logic.
+The dataset is built from human-labeled screen candidates collected during actual game sessions.
 
-The application also sets Windows DPI awareness at startup so coordinate mapping is less vulnerable to DPI scaling mismatches.
-
----
-
-# Runtime Modes
-
-`main.py` supports four modes.
-
-## Benchmark
-
-```powershell
-python main.py --mode benchmark --game balloons --fullscreen --duration 60 --no-gui
-```
-
-No mouse input is sent.
-
-The runtime measures processing and end-to-end pipeline timing.
-
----
-
-## Dry Run
-
-```powershell
-python main.py --mode dry-run --game balloons --fullscreen --duration 60 --no-gui --verbose-decisions
-```
-
-Runs the perception/tracking/decision pipeline without clicking.
-
-Useful for validating:
-
-- detections
-- tracks
-- target classification
-- special-state transitions
-- decision output
-- ML classifications
-
----
-
-## Live
-
-```powershell
-python main.py --mode live --game balloons --fullscreen --duration 60
-```
-
-Live mode enables mouse input.
-
-Hotkeys:
+The process is:
 
 ```text
-Right Shift → toggle clicking
-ESC         → emergency stop
+game session
+    ↓
+candidate collection
+    ↓
+human labeling
+    ↓
+session-aware dataset split
+    ↓
+MobileNetV3-Small training
+    ↓
+evaluation
+    ↓
+runtime checkpoint
 ```
 
-A startup delay can be used to switch to the game window:
+## Candidate Collection
 
-```powershell
-python main.py --mode live --game balloons --fullscreen --duration 60 --startup-delay 3
-```
-
-Live mode forces `input.enabled=True` even if the loaded configuration has it disabled.
-
----
-
-## Collection
+Collection mode captures candidate crops without enabling automated clicking.
 
 ```powershell
 python main.py --mode collect --game balloons --fullscreen --duration 60
 ```
 
-Collection mode is structurally input-free.
-
-It captures detector candidates for later human labeling.
-
-The collector writes candidate crops under:
+Candidates are stored under:
 
 ```text
 training/raw/session_*/
 ```
 
-It deliberately samples persistent/moved candidates rather than blindly saving every frame.
+The collector also supports recording human clicks so the dataset can contain examples selected from actual interaction.
 
 ---
 
-# Candidate Labeling
+## Human Labeling
 
-Human labels are treated as ground truth.
+The labeling system uses human labels as ground truth.
 
-The labeler supports:
+The available categories include:
 
 ```text
 B → balloon
@@ -764,120 +661,22 @@ Run:
 python training/label_candidates.py
 ```
 
-or point it at a particular session.
-
-The project explicitly avoids automatically treating detector predictions as training labels.
+Detector predictions are not automatically treated as training labels.
 
 ---
 
-# ML Vision
+## Dataset Splitting
 
-The repository contains an optional local semantic classifier based on:
-
-```text
-MobileNetV3-Small
-96×96 RGB candidate crops
-CPU inference
-```
-
-The model classes are:
-
-```text
-balloon
-duo
-notification
-super_g_ring
-ui
-```
-
-The architecture is:
-
-```text
-MSS
- ↓
-cheap OpenCV spatial candidates
- ↓
-96×96 candidate crops
- ↓
-MobileNetV3-Small
- ↓
-semantic class
- ↓
-existing tracker
- ↓
-existing game mechanics
- ↓
-existing executor
-```
-
-The ML path intentionally does not reuse the legacy semantic detectors for:
-
-- G-symbol
-- Super-G
-- golden-duo semantics
-
-Those semantics are supplied by the classifier in the ML profile.
-
-The ML path is opt-in through:
-
-```powershell
-$env:GOOGLE_MAX_ML_VISION="1"
-```
-
-Example:
-
-```powershell
-$env:GOOGLE_MAX_ML_VISION="1"
-python main.py --mode dry-run --game balloons --fullscreen --duration 60 --no-gui --verbose-decisions
-```
-
-Optional controls:
-
-```powershell
-$env:GOOGLE_MAX_ML_THRESHOLD="0.70"
-$env:GOOGLE_MAX_ML_BATCH_SIZE="16"
-$env:GOOGLE_MAX_ML_CHECKPOINT="training/artifacts/mobilenet_v3_small.pt"
-```
-
-The default non-ML runtime remains unchanged unless the environment variable is enabled.
-
-The checkpoint is intentionally not part of the normal Git repository tree. Training artifacts and raw image data are gitignored.
-
----
-
-# ML Training Pipeline
-
-Training dependencies are separate from runtime dependencies:
-
-```powershell
-python -m pip install -r training/requirements.txt
-```
-
-which provides:
-
-```text
-torch
-torchvision
-Pillow
-```
-
-## Dataset statistics
+The split is **session-aware**.
 
 ```powershell
 python training/dataset_stats.py training/raw
-```
-
-## Session-aware split
-
-```powershell
 python training/dataset_split.py training/raw
 ```
 
-The splitter keeps entire recording sessions together.
+The splitter keeps an entire recording session inside one split, preventing near-identical crops from the same session from appearing across train, validation, and test sets.
 
-That means crops from one recording cannot leak into train/validation/test simultaneously.
-
-Default proportions are:
+The default proportions are:
 
 ```text
 70% train
@@ -885,569 +684,369 @@ Default proportions are:
 15% test
 ```
 
-The split is deterministic from the configured seed.
-
-## Train
-
-```powershell
-python training/train.py
-```
-
-Equivalent:
-
-```powershell
-python training/train_classifier.py
-```
-
-The training pipeline uses:
-
-- MobileNetV3-Small
-- ImageNet pretrained weights by default
-- 96×96 crops
-- restrained augmentation
-- class-weighted cross entropy
-- CPU training by default
-- validation macro-F1 for checkpoint selection
-- early stopping
-
-Outputs include:
-
-```text
-training/artifacts/mobilenet_v3_small.pt
-training/artifacts/test_report.json
-```
-
-The test report contains:
-
-- accuracy
-- macro-F1
-- per-class precision
-- per-class recall
-- per-class F1
-- support
-- confusion matrix
-
-## Benchmark the classifier
-
-```powershell
-python training/benchmark_classifier.py
-```
-
-This separately measures CPU batch-1 inference latency.
+The assignment is deterministic from the configured seed while attempting to maintain useful class balance.
 
 ---
 
-# Telemetry
+## Training
 
-Runtime telemetry is written under:
-
-```text
-telemetry_output/
-```
-
-The logger records per-frame information such as:
-
-- frame ID
-- capture timestamp
-- detection timestamp
-- decision timestamp
-- input timestamp
-- processing time
-- end-to-end latency
-- detection count
-- track count
-- click count
-- action timestamps
-
-Session summaries additionally contain behavioral and outcome information.
-
----
-
-# Outcome Observability
-
-A major design constraint is that screen-only automation cannot directly observe authoritative game outcomes.
-
-`telemetry/outcome.py` therefore distinguishes:
-
-### Observable
-
-Examples:
-
-- when the bot saw a target
-- when an action was planned
-- when mouse-down occurred
-- click coordinates
-- modeled endpoint error
-- whether a target remained visible on the next frame
-
-### Estimated
-
-Examples:
-
-- estimated acquisition-to-click ticks
-- click-tick modulo
-- timing error relative to the bot's own intended timing
-
-### Unobservable
-
-Examples:
-
-- authoritative pop tick
-- authoritative hit/miss state
-- server/game-engine state
-- true game seed
-
-The project deliberately keeps these categories separate.
-
----
-
-# Downstream Diagnostics
-
-`diagnostics/downstream.py` provides a JSONL execution trace.
-
-It can capture events such as:
-
-```text
-tracking_decision
-frame_to_executor
-executor_result
-scheduler_start
-scheduler_phase
-click_context
-click_followup
-click_loop_latency
-decision_state_transition
-frame_timing
-click_timing
-diagnostic_summary
-```
-
-This makes it possible to answer questions like:
-
-```text
-Was the target detected?
-        ↓
-Was it selected?
-        ↓
-Did it reach the executor?
-        ↓
-Did the executor schedule it?
-        ↓
-Did SendInput execute?
-        ↓
-What was visible immediately afterward?
-```
-
-The trace is intended as a diagnostic artifact rather than permanent source data.
-
----
-
-# Analysis Tools
-
-The `analysis/` directory contains tools for examining behavioral telemetry.
-
-### `behavior_validation.py`
-
-Summarizes:
-
-- reaction intervals
-- spatial error
-- normalized spatial error
-- Duo timing
-- session duration
-- click-tick modulo
-- lag-1 reaction autocorrelation
-- intended vs observed timing error
-
-It can compare bot telemetry against a separate reference dataset.
-
-### `replay_validation.py`
-
-Validates the structure of captured interaction streams.
-
-It checks:
-
-- malformed interactions
-- non-monotonic ticks
-- non-finite coordinates
-
-It does **not** claim to replay or validate the authoritative game engine.
-
-### `calibration_plan.py`
-
-Prints the project's intended calibration workflow for dry runs, live sessions, human reference data, and telemetry analysis.
-
----
-
-# Debugging
-
-The debug visualizer is provided by:
-
-```text
-debug/visualizer.py
-```
-
-It can render:
-
-- detections
-- bounding boxes
-- centers
-- colors/confidence
-- outlines
-- track IDs
-- selected actions
-- FPS
-- current input mode
-
-Disable the window with:
-
-```powershell
---no-gui
-```
-
-For compact decision-level output:
-
-```powershell
---verbose-decisions
-```
-
----
-
-# Performance Instrumentation
-
-The vision system contains detailed stage-level timing instrumentation.
-
-The balloon profile records timings for components including:
-
-```text
-HSV conversion
-color masks
-morphology
-connected components
-component analysis
-classification
-notification detection
-G-symbol detection
-ring detection
-semantic processing
-```
-
-The ring detector separately records:
-
-```text
-crop
-grayscale
-blur
-Hough
-Canny
-scoring
-total
-```
-
-`benchmark_stages.py` provides lower-level capture/vision/tracking/decision benchmarks.
-
-`benchmark_behavior.py` benchmarks the stochastic behavioral model and includes Fitts-law checks.
-
----
-
-# Testing
-
-The project uses Python's built-in `unittest` runner.
-
-Run the full suite with:
-
-```powershell
-python -m unittest discover -s tests -v
-```
-
-The test suite covers multiple layers, including:
-
-- action scheduling
-- balloon contracts
-- balloon vision
-- vision profiling
-- decision mechanics
-- execution integration
-- fast execution
-- behavior modeling
-- behavioral replay validation
-- candidate collection
-- candidate labeling
-- CLI collection behavior
-- color classification
-- coordinate conversion
-- dataset splitting
-- dataset statistics
-- decision console
-- downstream diagnostics
-- G-symbol detection
-- ML classifier contracts
-- ring detection
-- semantic invariants
-- startup delay
-- tracking
-
-GitHub Actions runs the same `unittest` discovery command on Windows with Python 3.11.
-
----
-
-# CI
-
-The repository's GitHub Actions workflow:
-
-```text
-.github/workflows/tests.yml
-```
-
-uses:
-
-```text
-Windows latest
-Python 3.11
-requirements.txt
-python -m unittest discover -s tests -v
-```
-
-The project is Windows-specific because the live input layer depends on the Windows `SendInput` API.
-
----
-
-# Configuration
-
-Runtime configuration lives primarily in:
-
-```text
-config/defaults.json
-config/settings.py
-```
-
-Important configurable areas include:
-
-```text
-capture
-colors
-detection
-outline
-tracking
-grouping
-rules
-input
-feedback
-debug
-behavior
-```
-
-The default configuration contains the balloon-game HSV thresholds, geometry limits, tracking parameters, grouping parameters, and behavioral parameters.
-
-Custom configuration files can be supplied with:
-
-```powershell
-python main.py --config path\to\config.json
-```
-
-CLI arguments override relevant runtime settings.
-
----
-
-# Dependencies
-
-Core runtime:
-
-```text
-mss
-numpy
-opencv-python
-pywin32
-```
-
-Install with:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-ML/training dependencies:
-
-```text
-torch
-torchvision
-Pillow
-```
-
-Install separately with:
+Install the separate training dependencies:
 
 ```powershell
 python -m pip install -r training/requirements.txt
 ```
 
-Python 3.11 is the CI target.
-
----
-
-# Secondary Game Profile
-
-The repository also contains a simple Cookie Clicker profile:
-
-```text
-game_profiles/cookie_clicker.py
-```
-
-It detects the large cookie using HSV color segmentation and shape filtering, then selects its center.
-
-It is accessed with:
+Then:
 
 ```powershell
-python main.py --game cookie
+python training/train.py
 ```
 
-The primary development and mechanics work in this repository are centered on the balloon game.
+The training system uses:
+
+- MobileNetV3-Small
+- ImageNet pretrained weights
+- 96×96 RGB crops
+- image augmentation
+- class-weighted cross entropy
+- validation macro-F1 for model selection
+- early stopping
+
+The trained checkpoint is written to:
+
+```text
+training/artifacts/mobilenet_v3_small.pt
+```
+
+The generated training artifacts and raw dataset are intentionally kept out of the normal source tree.
 
 ---
 
-# Important Runtime Notes
+# Runtime Modes
 
-## `--fast` is not "maximum FPS"
+## Live
 
-Fast execution means the long behavioral scheduler is bypassed.
+The normal production mode:
 
-The fast policy still intentionally inserts configured inter-click timing and endpoint variation.
-
-## Humanized execution is currently incomplete
-
-The interface exists, but:
-
-```text
-HumanizedExecutionPolicy.tick()
-HumanizedExecutionPolicy.shutdown()
+```powershell
+python main.py --mode live --game balloons --fullscreen --duration 60
 ```
 
-currently raise `NotImplementedError`.
+For the current ML configuration:
 
-The implemented live balloon execution path is the fast policy.
+```powershell
+$env:GOOGLE_MAX_ML_VISION="1"
+$env:GOOGLE_MAX_ML_CHECKPOINT="training/artifacts/mobilenet_v3_small.pt"
+$env:GOOGLE_MAX_ML_THRESHOLD="0.70"
+$env:GOOGLE_MAX_ML_BATCH_SIZE="16"
 
-## ML is optional
-
-The normal balloon profile does not require PyTorch.
-
-The ML path is explicitly enabled through:
-
-```text
-GOOGLE_MAX_ML_VISION=1
+python main.py --mode live --game balloons --fullscreen --duration 60 --no-gui --verbose-decisions
 ```
 
-and requires a trained checkpoint.
+Live mode enables mouse input.
 
-## Training data is separate from source
-
-Raw labeled crops and generated training artifacts are gitignored.
-
-They should not be treated as ordinary source files.
-
----
-
-# Current Architecture in One View
+Hotkeys:
 
 ```text
-                    ┌─────────────────────┐
-                    │      Browser/Game   │
-                    └──────────┬──────────┘
-                               │ pixels
-                               ▼
-                    ┌─────────────────────┐
-                    │     MSS Capture     │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                 ┌───────────────────────────┐
-                 │       Vision Layer        │
-                 │                           │
-                 │ HSV / morphology          │
-                 │ connected components      │
-                 │ geometry                  │
-                 │ outline detection         │
-                 │ ring detection            │
-                 │ G-symbol detection        │
-                 │ optional MobileNet        │
-                 └─────────────┬─────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │     Target Model    │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │      Tracking       │
-                    │                     │
-                    │ identity            │
-                    │ temporal evidence   │
-                    │ click attempts      │
-                    │ static UI detection │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                 ┌───────────────────────────┐
-                 │    Balloon Decision       │
-                 │                           │
-                 │ normal play               │
-                 │ Twin / Duo                │
-                 │ B→R→Y→G sequence         │
-                 │ Super-G                   │
-                 │ G lane                    │
-                 │ Gemini / notifications   │
-                 └─────────────┬─────────────┘
-                               │
-                               ▼
-                 ┌───────────────────────────┐
-                 │     Execution Layer       │
-                 │                           │
-                 │ FastExecutionPolicy       │
-                 │ BalloonExecutor            │
-                 │ schedulers                 │
-                 └─────────────┬─────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │   Windows Input     │
-                    │     SendInput       │
-                    └─────────────────────┘
+Right Shift → toggle clicking
+ESC         → emergency stop
+```
 
+A startup delay can be useful when switching to the game window:
 
-          ┌──────────────────────────────────────┐
-          │ Telemetry / Diagnostics / Analysis   │
-          │                                      │
-          │ timing • outcomes • traces • replay  │
-          └──────────────────────────────────────┘
+```powershell
+python main.py --mode live --game balloons --fullscreen --duration 60 --startup-delay 3
 ```
 
 ---
 
-# Project Status
+## Dry Run
 
-The repository currently represents a fairly complete end-to-end automation stack rather than a single vision prototype.
+Dry run exercises perception, tracking, and decision-making without sending automated clicks.
 
-The major layers are separated and testable:
-
-```text
-capture
-vision
-tracking
-decision
-behavior
-execution
-input
-telemetry
-diagnostics
-training
-analysis
+```powershell
+python main.py --mode dry-run --game balloons --fullscreen --duration 60 --no-gui --verbose-decisions
 ```
 
-The main remaining distinction to keep in mind when working on the project is that **perception, behavioral modeling, and authoritative game outcomes are three different things**.
+Useful for inspecting:
 
-The bot can observe pixels.
+- detections
+- tracks
+- semantic classifications
+- special-state transitions
+- decision output
+- ML predictions
+- timing diagnostics
 
-The behavioral model can generate modeled human-like actions.
+---
 
-Neither gives the bot direct access to the game's internal truth.
+## Collection
 
-That separation is intentional and should be preserved when extending the system.
+Collection mode is used to build additional training data:
+
+```powershell
+python main.py --mode collect --game balloons --fullscreen --duration 60
+```
+
+It is input-free from the automated-clicking side and is intended for gathering candidate crops for later human labeling.
+
+---
+
+# Telemetry and Diagnostics
+
+Telemetry lives under:
+
+```text
+telemetry/
+```
+
+Diagnostics live under:
+
+```text
+diagnostics/
+```
+
+The runtime records information about the observable pipeline, including things such as:
+
+- frame timing
+- vision timing
+- tracking timing
+- decision timing
+- ML preprocessing/inference timing
+- candidate counts
+- semantic class distributions
+- selected actions
+- click timing
+- coordinates
+- execution outcomes
+
+The diagnostics system deliberately distinguishes between:
+
+**Observed**
+
+Things directly visible from the screen or directly measured by the program.
+
+**Estimated**
+
+Quantities inferred from timestamps and observable events.
+
+**Unobservable**
+
+Authoritative game-engine information that the screen-only interface does not expose.
+
+This distinction matters when analyzing performance. A click being sent is observable. Whether the remote game engine definitively registered that click is not.
+
+---
+
+# Performance
+
+The system has been profiled directly during fullscreen 60-second runs.
+
+The main performance constraint is the vision path rather than screen capture or mouse input.
+
+The architecture therefore tries to keep the expensive work narrow:
+
+```text
+cheap spatial filtering
+        ↓
+small candidate set
+        ↓
+semantic classification
+        ↓
+game mechanics
+        ↓
+click
+```
+
+The current ML configuration uses batched CPU inference with:
+
+```text
+MobileNetV3-Small
+96×96 RGB
+batch size: 16
+confidence threshold: 0.70
+```
+
+The project is optimized around the actual click-critical path rather than maximizing the number of theoretical detections per frame.
+
+---
+
+# Project Structure
+
+```text
+Google_Max/
+│
+├── main.py
+│
+├── capture/
+│   ├── base.py
+│   └── mss_capture.py
+│
+├── vision/
+│   ├── color_classifier.py
+│   ├── detector.py
+│   ├── feedback.py
+│   ├── g_symbol_detector.py
+│   ├── ml_classifier.py
+│   ├── outline_detector.py
+│   └── ring_detector.py
+│
+├── tracking/
+│   └── tracker.py
+│
+├── decision/
+│   ├── grouping.py
+│   └── mechanics.py
+│
+├── behavior/
+│   ├── action_scheduler.py
+│   ├── balloon_executor.py
+│   ├── config.py
+│   ├── distributions.py
+│   ├── execution_policy.py
+│   ├── fast_policy.py
+│   ├── model.py
+│   ├── movement.py
+│   └── profile.py
+│
+├── input/
+│   ├── base.py
+│   ├── coordinates.py
+│   └── sendinput.py
+│
+├── game_profiles/
+│   ├── base.py
+│   ├── balloon_game.py
+│   ├── balloon_types.py
+│   ├── cookie_clicker.py
+│   └── ml_balloon_game.py
+│
+├── capture/
+│
+├── telemetry/
+│   ├── behavioral.py
+│   ├── logger.py
+│   ├── outcome.py
+│   └── timing.py
+│
+├── diagnostics/
+│   ├── decision_console.py
+│   └── downstream.py
+│
+├── training/
+│   ├── candidate_collector.py
+│   ├── dataset_split.py
+│   ├── dataset_stats.py
+│   ├── label_candidates.py
+│   ├── train.py
+│   ├── train_classifier.py
+│   ├── benchmark_classifier.py
+│   ├── README.md
+│   └── requirements.txt
+│
+├── config/
+│   ├── defaults.json
+│   └── settings.py
+│
+├── debug/
+│   └── visualizer.py
+│
+└── tests/
+```
+
+---
+
+# Testing
+
+The project has a dedicated test suite covering the active perception, tracking, decision, behavior, execution, and training-related components.
+
+The repository is intended to be changed incrementally with the existing tests acting as the regression boundary for the live system.
+
+---
+
+# Cookie Clicker
+
+Cookie Clicker is the original legacy game profile.
+
+It is intentionally still part of the repository because it was the project's first black-box computer-vision experiment and remains functional.
+
+Its implementation is deliberately much simpler:
+
+```text
+screen
+  ↓
+color segmentation
+  ↓
+cookie geometry
+  ↓
+center detection
+  ↓
+click
+```
+
+It is useful as the historical starting point for the project and as a minimal example of the `GameProfile` interface.
+
+---
+
+# Design Philosophy
+
+Google_Max is built around a fairly simple idea:
+
+> **Make the machine see the game the way the program is allowed to see it.**
+
+The system does not need to know what the browser thinks is happening.
+
+It needs to turn pixels into increasingly useful representations:
+
+```text
+pixels
+  ↓
+candidates
+  ↓
+objects
+  ↓
+tracks
+  ↓
+game state
+  ↓
+actions
+  ↓
+mouse input
+```
+
+Each stage has a specific responsibility.
+
+Vision should not own gameplay state.
+
+Tracking should not decide strategy.
+
+The decision engine should not move the mouse.
+
+The executor should not reinterpret what a balloon means.
+
+That separation is what lets the project grow from a collection of OpenCV heuristics into a full perception-and-control system without turning the entire thing into one giant script.
+
+---
+
+# Status
+
+The primary target is the balloon game.
+
+The production path currently consists of:
+
+```text
+MSS
+→ OpenCV vision
+→ optional MobileNetV3-Small semantic classification
+→ temporal tracking
+→ game-specific decision engine
+→ fast execution policy
+→ BalloonExecutor
+→ Windows SendInput
+```
+
+The ML-enabled live path has been exercised end-to-end in 60-second runs.
+
+The repository also retains the collection and training infrastructure used to build and improve the semantic vision system.
+
+---
