@@ -20,6 +20,7 @@ class BalloonTrack:
     confidence: float
     first_seen: float
     last_seen: float
+    capture_timestamp: float | None = None
     clicked: bool = False
     click_attempts: int = 0
     frames_missing: int = 0
@@ -45,7 +46,11 @@ class Tracker:
     def tracks(self) -> dict[int, BalloonTrack]:
         return self._tracks
 
-    def update(self, detections: list[Detection]) -> dict[int, BalloonTrack]:
+    def update(
+        self,
+        detections: list[Detection],
+        capture_timestamp: float | None = None,
+    ) -> dict[int, BalloonTrack]:
         now = time.perf_counter_ns() / 1e9
         self._frame_count += 1
 
@@ -106,7 +111,7 @@ class Tracker:
 
         for j, det in enumerate(detections):
             if j not in matched_detection_indices:
-                self._create_track(det, now)
+                self._create_track(det, now, capture_timestamp)
 
         stale_ids = [
             tid for tid, t in self._tracks.items()
@@ -117,7 +122,12 @@ class Tracker:
 
         return dict(self._tracks)
 
-    def _create_track(self, det: Detection, now: float) -> None:
+    def _create_track(
+        self,
+        det: Detection,
+        now: float,
+        capture_timestamp: float | None,
+    ) -> None:
         track_id = self._next_id
         self._next_id += 1
         self._tracks[track_id] = BalloonTrack(
@@ -129,6 +139,7 @@ class Tracker:
             confidence=det.color_confidence,
             first_seen=now,
             last_seen=now,
+            capture_timestamp=capture_timestamp,
             tracking_class=det.tracking_class,
             metadata={
                 **dict(det.metadata),
