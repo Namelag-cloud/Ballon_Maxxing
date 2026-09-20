@@ -38,11 +38,11 @@ class HumanizedExecutionPolicy:
     _REACTION_BOUNDS_MS = {
         "standard": (150.0, 800.0),
         "notification": (150.0, 800.0),
-        "golden_duo_first": (150.0, 800.0),
-        "golden_duo_second": (150.0, 600.0),
+        "golden_duo_first": (150.0, 300.0),
+        "golden_duo_second": (150.0, 300.0),
         "gemini": (150.0, 1500.0),
         "super_g_node": (150.0, 1500.0),
-        "balloon_g": (150.0, 500.0),
+        "balloon_g": (150.0, 300.0),
     }
 
     def __init__(
@@ -50,9 +50,11 @@ class HumanizedExecutionPolicy:
         diagnostic: DownstreamDiagnostic | None = None,
         *,
         rng: random.Random | None = None,
+        reaction_rng: random.Random | None = None,
     ) -> None:
         self._diagnostic = diagnostic
         self._rng = rng or random.Random()
+        self._reaction_rng = reaction_rng or random.Random()
         self._profile: HumanProfile | None = None
         self._last_reaction_ticks: float | None = None
         self._session_started_at: float | None = None
@@ -144,7 +146,7 @@ class HumanizedExecutionPolicy:
             delay_s = self._reaction_delay_s(
                 transformed.target_type,
                 is_twin_second=False,
-                combo_eligible=False,
+                combo_eligible=self._is_combo_eligible(transformed.target_type),
             )
             time.sleep(delay_s)
             result = self._fast_single(
@@ -195,6 +197,10 @@ class HumanizedExecutionPolicy:
             outcomes=left.outcomes + right.outcomes,
         )
 
+    @staticmethod
+    def _is_combo_eligible(target_type: TargetType) -> bool:
+        return target_type in {TargetType.NORMAL_BALLOON, TargetType.SPECIAL_SEQUENCE_BALLOON}
+
     def _reaction_delay_s(
         self,
         target_type: TargetType,
@@ -210,7 +216,7 @@ class HumanizedExecutionPolicy:
         # the bounds; the final draw is clipped defensively.
         median_ms = (lower_ms + upper_ms) * 0.5
         sigma_ms = min(median_ms - lower_ms, upper_ms - median_ms) / self._GAUSSIAN_Z_99
-        sampled_ms = self._rng.gauss(median_ms, sigma_ms)
+        sampled_ms = self._reaction_rng.gauss(median_ms, sigma_ms)
         sampled_ms = max(lower_ms, min(upper_ms, sampled_ms))
 
         sampled_ticks = sampled_ms / self._ENGINE_TICK_MS
