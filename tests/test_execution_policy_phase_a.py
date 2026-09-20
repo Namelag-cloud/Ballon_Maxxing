@@ -254,6 +254,14 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         self.assertGreaterEqual(g * 1000.0, 150.0)
         self.assertLessEqual(g * 1000.0, 300.0)
 
+        precursor = policy._reaction_delay_s(
+            TargetType.SPECIAL_SEQUENCE_BALLOON,
+            is_twin_second=False,
+            combo_eligible=True,
+        )
+        self.assertGreaterEqual(precursor * 1000.0, 150.0)
+        self.assertLessEqual(precursor * 1000.0, 400.0)
+
         gemini = policy._reaction_delay_s(
             TargetType.MULTICOLOR_SPECIAL,
             is_twin_second=False,
