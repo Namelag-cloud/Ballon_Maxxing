@@ -108,6 +108,7 @@ class TestBehavioralReplayValidation(unittest.TestCase):
         profile = HumanProfileConfig(start_delay_min_s=2.0, start_delay_max_s=2.0, final_activity_cutoff_s=1.5)
         model = BehavioralModel(BehaviorConfig(enabled=True, seed=5, human_profile=profile))
         model.start_session()
+        model._sampled_start_delay_s = 2.0
         self.assertFalse(model.actions_ready())
         model._session_start -= 2.1
         self.assertTrue(model.actions_ready())
