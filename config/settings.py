@@ -10,7 +10,6 @@ from behavior.config import BehaviorConfig
 
 
 class RunMode(Enum):
-    BENCHMARK = "benchmark"
     DRY_RUN = "dry-run"
     LIVE = "live"
     COLLECT = "collect"
@@ -48,9 +47,9 @@ class DetectionConfig:
 @dataclass
 class OutlineConfig:
     enabled: bool = True
-    min_white_ratio: float = 0.15
+    min_white_ratio: float = 0.10
     min_contrast: float = 30.0
-    border_sample_width: int = 3
+    border_sample_width: int = 10
 
 
 @dataclass
@@ -69,16 +68,10 @@ class GroupingConfig:
 
 
 @dataclass
-class RulesConfig:
-    click_white: bool = False
-    min_size: int = 200
-    max_size: int = 30000
-
-
 @dataclass
 class InputConfig:
     backend: str = "sendinput"
-    enabled: bool = False
+    enabled: bool = True
     click_delay_ms: int = 0
 
 
@@ -102,14 +95,13 @@ class DebugConfig:
 
 @dataclass
 class Settings:
-    mode: RunMode = RunMode.BENCHMARK
+    mode: RunMode = RunMode.LIVE
     capture: CaptureConfig = field(default_factory=CaptureConfig)
     colors: dict[str, ColorThreshold] = field(default_factory=dict)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     outline: OutlineConfig = field(default_factory=OutlineConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     grouping: GroupingConfig = field(default_factory=GroupingConfig)
-    rules: RulesConfig = field(default_factory=RulesConfig)
     input: InputConfig = field(default_factory=InputConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
@@ -117,7 +109,7 @@ class Settings:
 
     @classmethod
     def from_dict(cls, data: dict) -> Settings:
-        mode = RunMode(data.get("mode", "benchmark"))
+        mode = RunMode(data.get("mode", "live"))
 
         cap_data = data.get("capture", {})
         region_data = cap_data.get("region", {})
@@ -146,9 +138,6 @@ class Settings:
         group_data = data.get("grouping", {})
         grouping = GroupingConfig(**group_data)
 
-        rules_data = data.get("rules", {})
-        rules = RulesConfig(**rules_data)
-
         input_data = data.get("input", {})
         inp = InputConfig(**input_data)
 
@@ -169,7 +158,6 @@ class Settings:
             outline=outline,
             tracking=tracking,
             grouping=grouping,
-            rules=rules,
             input=inp,
             feedback=feedback,
             debug=debug,
