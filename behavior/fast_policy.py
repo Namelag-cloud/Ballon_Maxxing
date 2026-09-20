@@ -254,7 +254,7 @@ class FastExecutionPolicy:
                 continue
 
             if dispatched_primary_actions:
-                time.sleep(SEQUENTIAL_CLICK_GAP_S)
+                time.sleep(self._sequential_gap_s())
 
             screen_xy = self._to_screen(
                 action.position,
