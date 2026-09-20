@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import time
 import unittest
+from dataclasses import replace
 
 from behavior.action_scheduler import ActionScheduler, TwinActionScheduler
 from behavior.config import BehaviorConfig, ErrorConfig, HumanProfileConfig
 from behavior.model import BehavioralAction, BehavioralModel
+from behavior.profile import HumanProfile
 from decision.mechanics import BalloonDecisionEngine
 from game_profiles.balloon_types import TargetType
 from vision.feedback import FeedbackReader
@@ -83,8 +85,14 @@ class TestBehavioralReplayValidation(unittest.TestCase):
         from behavior.config import EndpointErrorConfig
         base = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, duo_y_variance_multiplier=1.0, miss_rate_min=0.0, miss_rate_max=0.0)
         duo = HumanProfileConfig(spatial_sigma_pct_min=0.1, spatial_sigma_pct_max=0.1, fat_finger_probability=0.0, duo_y_variance_multiplier=2.0, miss_rate_min=0.0, miss_rate_max=0.0)
-        a = BehavioralModel(BehaviorConfig(enabled=True, seed=11, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=base)).plan_action(0,0,100,100,40,target_metadata={"is_twin":False})
-        b = BehavioralModel(BehaviorConfig(enabled=True, seed=11, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=duo)).plan_action(0,0,100,100,40,target_metadata={"is_twin":True})
+        a_model = BehavioralModel(BehaviorConfig(enabled=True, seed=11, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=base))
+        b_model = BehavioralModel(BehaviorConfig(enabled=True, seed=11, endpoint_error=EndpointErrorConfig(enabled=False), human_profile=duo))
+        base_profile = replace(a_model.profile, spatial_sigma_pct=0.1, miss_rate=0.0, duo_y_variance_multiplier=1.0)
+        duo_profile = replace(base_profile, duo_y_variance_multiplier=2.0)
+        a_model._profile = base_profile
+        b_model._profile = duo_profile
+        a = a_model.plan_action(0,0,100,100,40,target_metadata={"is_twin":False})
+        b = b_model.plan_action(0,0,100,100,40,target_metadata={"is_twin":True})
         self.assertAlmostEqual(b.click_position[0] - 100.0, a.click_position[0] - 100.0, places=6)
         self.assertAlmostEqual(b.click_position[1] - 100.0, 2.0 * (a.click_position[1] - 100.0), places=6)
 
