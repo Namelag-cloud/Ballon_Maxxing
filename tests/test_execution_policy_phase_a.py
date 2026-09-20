@@ -204,11 +204,15 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         self.assertEqual(self.input.downs, [0.0, 0.0])
         self.assertEqual(self.input.pairs[0][0:2], ((102, 100), (198, 100)))
 
-    def test_executor_uses_injected_humanized_policy_without_fallback(self):
+    def test_executor_routes_injected_humanized_policy_to_input_backend(self):
+        class FixedRNG:
+            def gauss(self, _mu, _sigma):
+                return 2.0
+
         executor = BalloonExecutor(
             FakeBehavior(),
             clock=self.clock,
-            execution_policy=HumanizedExecutionPolicy(),
+            execution_policy=HumanizedExecutionPolicy(rng=FixedRNG()),
         )
         decision = self.engine.decide([
             balloon_action(
@@ -219,15 +223,13 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
             )
         ])
 
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "HumanizedExecutionPolicy is not implemented until Phase B",
-        ):
-            executor.tick(decision.actions, None, self.input, 0, 0, True)
+        result = executor.tick(decision.actions, None, self.input, 0, 0, True)
 
-        self.assertEqual(self.input.downs, [])
+        self.assertEqual(result.clicks_sent, 1)
+        self.assertEqual([(x, y) for _, x, y in self.input.moves], [(102, 102)])
+        self.assertEqual(self.input.downs, [0.0])
 
-    def test_humanized_policy_fails_loudly_without_fallback(self):
+    def test_humanized_policy_honors_disabled_input(self):
         policy = HumanizedExecutionPolicy()
         decision = self.engine.decide([
             balloon_action(
@@ -238,12 +240,13 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
             )
         ])
 
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "HumanizedExecutionPolicy is not implemented until Phase B",
-        ):
-            policy.tick(decision, self._context(), self.input)
+        result = policy.tick(
+            decision,
+            self._context(input_enabled=False),
+            self.input,
+        )
 
+        self.assertEqual(result.clicks_sent, 0)
         self.assertEqual(self.input.downs, [])
         self.assertEqual(self.input.ups, [])
 
