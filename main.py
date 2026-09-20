@@ -195,6 +195,7 @@ class Application:
                 behavioral_seed=self._behavior.behavioral_seed,
                 profile_seed=self._behavior.profile_seed,
                 human_profile=self._behavior.profile.as_dict(),
+                screen_capture=f"{settings.capture.region.width}x{settings.capture.region.height}",
                 feedback_signals="screen-only; unvalidated UI signals remain UNOBSERVABLE THROUGH CURRENT INTERFACE",
             )
             if execution_policy is not None and hasattr(execution_policy, "set_profile"):
