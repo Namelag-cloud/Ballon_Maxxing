@@ -106,40 +106,32 @@ class HumanizedExecutionPolicy:
                 first = self._offset_balloon(action.targets[0])
                 second = self._offset_balloon(action.targets[1])
 
-                first_delay = self._reaction_delay_s(
+                # A duo is one atomic engine interaction. Apply one human
+                # reaction delay before noticing/dispatching the pair, then
+                # preserve FastExecutionPolicy's near-simultaneous click_pair
+                # dispatch. The engine's 750 ms duo wall therefore cannot be
+                # violated by two independent reaction sleeps.
+                pair_delay = self._reaction_delay_s(
                     first.target_type,
                     is_twin_second=False,
-                    combo_eligible=True,
+                    combo_eligible=False,
                 )
-                time.sleep(first_delay)
-                first_result = self._fast_single(first, decision, context, input_backend)
-                combined = self._combine(combined, first_result)
+                time.sleep(pair_delay)
 
-                second_delay = self._reaction_delay_s(
-                    second.target_type,
-                    is_twin_second=True,
-                    combo_eligible=True,
+                twin = replace(action, targets=(first, second))
+                pair_decision = replace(
+                    decision,
+                    actions=(twin,),
+                    g_action=None,
+                    multicolor_specials=(),
+                    notifications=(),
                 )
-                time.sleep(second_delay)
-                second_result = self._fast_single(second, decision, context, input_backend)
-                combined = self._combine(combined, second_result)
-
-                if (
-                    first_result.action_timestamps is not None
-                    and second_result.action_timestamps is not None
-                ):
-                    first_ts = first_result.action_timestamps
-                    second_ts = second_result.action_timestamps
-                    combined = replace(
-                        combined,
-                        twin_completion=TwinActionCompletion(
-                            first_ts,
-                            second_ts,
-                            abs(first_ts.click_down - second_ts.click_down) * 1000.0,
-                            second_delay * 1000.0,
-                        ),
-                        completed_primary_action=action,
-                    )
+                pair_result = self._fast.tick(
+                    pair_decision,
+                    context,
+                    input_backend,
+                )
+                combined = self._combine(combined, pair_result)
                 continue
 
             transformed = self._offset_balloon(action)
