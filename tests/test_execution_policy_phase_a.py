@@ -201,7 +201,7 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         result = policy.tick(decision, self._context(), self.input)
 
         self.assertEqual(result.clicks_sent, 2)
-        self.assertEqual(self.input.downs, [0.0, 0.0])
+        self.assertEqual(len(self.input.pairs), 1)
         self.assertEqual(self.input.pairs[0][0:2], ((102, 100), (198, 100)))
 
     def test_executor_routes_injected_humanized_policy_to_input_backend(self):
