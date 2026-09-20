@@ -19,6 +19,7 @@ class HumanProfile:
     reaction_sigma: float = 0.35
     perception_ticks: float = 3.5
     spatial_sigma_pct: float = 0.16
+    spatial_sigma_px: float = 5.0
     miss_rate: float = 0.035
     notif_hit_rate: float = 0.01
     duo_delta_mu_ms: float = 150.0
@@ -30,6 +31,7 @@ class HumanProfile:
     balloon_g_abandon_rate: float = 0.10
     idle_lambda: float = 0.05
     start_delay_sec: float = 2.0
+    session_duration_s: float = 60.0
     warmup_sec: float = 20.0
     fatigue_per_min: float = 1.0
     early_exit_prob: float = 0.10
@@ -52,13 +54,21 @@ class HumanProfile:
             sig = float(cfg.get(f"{name}_sigma", sigma))
             return max(float(cfg.get(f"{name}_min", low)), min(float(cfg.get(f"{name}_max", high)), rng.lognormal(math.log(med), sig)))
 
+        def clipped_normal(mean: float, sigma: float, low: float, high: float) -> float:
+            return max(low, min(high, rng.normal(mean, sigma)))
+
+        def beta_bounded(a: float, b: float, low: float, high: float) -> float:
+            return low + rng.beta(a, b) * (high - low)
+
         return cls(
-            reaction_mu_ticks=positive_lognormal("reaction", 20.0, 0.18, 12.0, 32.0),
-            reaction_sigma=float(cfg.get("reaction_sigma", 0.35)),
+            # These are sampled once per session from meta-distributions.
+            reaction_mu_ticks=clipped_normal(18.0, 2.0, 10.0, 30.0),
+            reaction_sigma=rng.uniform(0.30, 0.40),
             perception_ticks=uniform("perception", 2.0, 5.0),
             spatial_sigma_pct=uniform("spatial_sigma_pct", 0.10, 0.22),
-            miss_rate=uniform("miss_rate", 0.02, 0.05),
-            notif_hit_rate=uniform("notif_hit_rate", 0.005, 0.02),
+            spatial_sigma_px=clipped_normal(5.0, 1.5, 1.0, 10.0),
+            miss_rate=beta_bounded(2.0, 98.0, 0.005, 0.05),
+            notif_hit_rate=beta_bounded(2.0, 398.0, 0.0, 0.02),
             duo_delta_mu_ms=positive_lognormal("duo_delta", 150.0, 0.25, 75.0, 300.0),
             duo_delta_sigma=float(cfg.get("duo_delta_sigma", 0.4)),
             duo_delta_min_ms=float(cfg.get("duo_delta_min_ms", 50.0)),
@@ -68,6 +78,7 @@ class HumanProfile:
             balloon_g_abandon_rate=uniform("balloon_g_abandon_rate", 0.05, 0.15),
             idle_lambda=uniform("idle_lambda", 0.03, 0.08),
             start_delay_sec=uniform("start_delay_sec", 1.0, 3.0),
+            session_duration_s=clipped_normal(60.0, 5.0, 50.0, 75.0),
             warmup_sec=uniform("warmup_sec", 15.0, 25.0),
             fatigue_per_min=uniform("fatigue_per_min", 0.5, 2.0),
             early_exit_prob=uniform("early_exit_prob", 0.05, 0.15),
