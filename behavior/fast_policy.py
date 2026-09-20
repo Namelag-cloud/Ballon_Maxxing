@@ -11,6 +11,7 @@ from telemetry.outcome import SessionOutcome
 from telemetry.timing import now_monotonic
 
 SEQUENTIAL_CLICK_GAP_RANGE_S = (0.030, 0.050)
+NORMAL_CLICK_OFFSET_PX_RANGE = (-2, 2)
 
 from .execution_policy import (
     BalloonExecutionResult,
@@ -261,11 +262,12 @@ class FastExecutionPolicy:
                 context.region_left,
                 context.region_top,
             )
+            click_xy = self._normal_click_offset(screen_xy)
             behavioral_action = self._fast_behavioral_action(
-                screen_xy,
+                click_xy,
                 action.target_width,
             )
-            action_timestamps = self._fast_click(input_backend, screen_xy)
+            action_timestamps = self._fast_click(input_backend, click_xy)
             self._log_click_timing(
                 action_timestamps,
                 lane="primary",
@@ -280,8 +282,8 @@ class FastExecutionPolicy:
                 self._make_outcome(
                     behavioral_action,
                     action_timestamps,
-                    screen_xy[0],
-                    screen_xy[1],
+                    click_xy[0],
+                    click_xy[1],
                     action.target_type.value,
                     target_id=action.target_id,
                     execution_status="fast",
@@ -357,6 +359,12 @@ class FastExecutionPolicy:
                 max(12.0, float(action.target_width) * 0.5),
             )
         )
+
+    def _normal_click_offset(self, screen_xy: tuple[int, int]) -> tuple[int, int]:
+        """Apply a tiny randomized endpoint offset to normal-balloon clicks only."""
+        dx = self._rng.randint(*NORMAL_CLICK_OFFSET_PX_RANGE)
+        dy = self._rng.randint(*NORMAL_CLICK_OFFSET_PX_RANGE)
+        return screen_xy[0] + dx, screen_xy[1] + dy
 
     def _fast_click(
         self,
