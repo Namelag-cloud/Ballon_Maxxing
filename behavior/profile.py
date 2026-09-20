@@ -60,6 +60,8 @@ class HumanProfile:
         def beta_bounded(name: str, mean: float, low: float, high: float, concentration: float = 12.0) -> float:
             low = float(cfg.get(f"{name}_min", low))
             high = float(cfg.get(f"{name}_max", high))
+            if high <= low:
+                return low
             normalized_mean = (mean - low) / (high - low)
             alpha = max(0.1, normalized_mean * concentration)
             beta = max(0.1, (1.0 - normalized_mean) * concentration)
