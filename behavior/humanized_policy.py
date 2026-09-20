@@ -56,11 +56,10 @@ class HumanizedExecutionPolicy:
         transformed = replace(
             decision,
             actions=tuple(self._offset_action(action) for action in decision.actions),
-            g_action=(
-                self._offset_action(decision.g_action)
-                if decision.g_action is not None
-                else None
-            ),
+            # Preserve the old center-click behavior for the actual G target.
+            # The G hit path is sensitive enough that the generic endpoint offset
+            # should not be stacked on top of ML/tracker localization error.
+            g_action=decision.g_action,
             multicolor_specials=tuple(
                 self._offset_action(action)
                 for action in decision.multicolor_specials
