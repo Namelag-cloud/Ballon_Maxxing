@@ -88,10 +88,13 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         result = policy.tick(decision, self._context(), self.input)
 
         self.assertEqual(result.clicks_sent, 2)
-        self.assertEqual(
-            [(x, y) for _, x, y in self.input.moves],
-            [(100, 100), (200, 200)],
-        )
+        # Fast policy applies the configured humanization offset to normal clicks.
+        expected = [(100, 100), (200, 200)]
+        actual = [(x, y) for _, x, y in self.input.moves]
+        self.assertEqual(len(actual), len(expected))
+        for (x, y), (expected_x, expected_y) in zip(actual, expected):
+            self.assertLessEqual(abs(x - expected_x), 2)
+            self.assertLessEqual(abs(y - expected_y), 2)
         self.assertEqual(self.input.downs, [0.0, 0.0])
 
     def test_executor_uses_injected_humanized_policy_without_fallback(self):
