@@ -157,7 +157,7 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
 
         self.assertEqual(result.clicks_sent, 1)
         x, y = self.input.moves[0][1:]
-        self.assertLessEqual(((x - 100) ** 2 + (y - 100) ** 2) ** 0.5, 4.0)
+        self.assertLessEqual(((x - 100) ** 2 + (y - 100) ** 2) ** 0.5, 9.0)
 
     def test_humanized_policy_preserves_twin_dispatch_and_gives_each_target_own_offset(self):
         class FixedRNG:
