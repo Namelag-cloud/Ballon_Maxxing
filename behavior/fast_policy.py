@@ -10,7 +10,7 @@ from input.coordinates import frame_to_screen
 from telemetry.outcome import SessionOutcome
 from telemetry.timing import now_monotonic
 
-SEQUENTIAL_CLICK_GAP_S = 0.040
+SEQUENTIAL_CLICK_GAP_RANGE_S = (0.030, 0.050)
 
 from .execution_policy import (
     BalloonExecutionResult,
@@ -31,9 +31,13 @@ class FastExecutionPolicy:
     ) -> None:
         self._clock = clock
         self._diagnostic = diagnostic
+        self._rng = __import__("random").Random()
         self._recent_fast_clicks: list[
             tuple[float, int | None, tuple[int, int], float]
         ] = []
+
+    def _sequential_gap_s(self) -> float:
+        return self._rng.uniform(*SEQUENTIAL_CLICK_GAP_RANGE_S)
 
     def tick(
         self,
@@ -141,7 +145,7 @@ class FastExecutionPolicy:
                     context.region_top,
                 )
                 if dispatched_primary_actions:
-                    time.sleep(SEQUENTIAL_CLICK_GAP_S)
+                    time.sleep(self._sequential_gap_s())
 
                 first_behavior = self._fast_behavioral_action(
                     first_xy,
