@@ -19,6 +19,38 @@ from .execution_policy import (
 )
 
 
+class _DelayedTwinInputBackend:
+    """Delegating input backend that adds only the requested duo inter-click delay."""
+
+    def __init__(self, backend: InputBackend, inter_click_delay_s: float) -> None:
+        self._backend = backend
+        self._inter_click_delay_s = inter_click_delay_s
+
+    def move_to(self, x: int, y: int):
+        return self._backend.move_to(x, y)
+
+    def left_down(self):
+        return self._backend.left_down()
+
+    def left_up(self):
+        return self._backend.left_up()
+
+    def click_pair(
+        self,
+        first: tuple[int, int],
+        second: tuple[int, int],
+        inter_click_delay_s: float = 0.0,
+    ) -> tuple[float, float, float, float]:
+        first_move = self._backend.move_to(*first)
+        first_down = self._backend.left_down()
+        first_up = self._backend.left_up()
+        time.sleep(self._inter_click_delay_s)
+        self._backend.move_to(*second)
+        second_down = self._backend.left_down()
+        second_up = self._backend.left_up()
+        return first_down, first_up, second_down, second_up
+
+
 class HumanizedExecutionPolicy:
     """Humanized execution at the execution boundary.
 
@@ -41,7 +73,7 @@ class HumanizedExecutionPolicy:
         "golden_duo_first": (150.0, 300.0),
         "golden_duo_second": (150.0, 300.0),
         "gemini": (150.0, 1500.0),
-        "super_g_node": (150.0, 1500.0),
+        "super_g_node": (150.0, 800.0),
         "balloon_g": (150.0, 300.0),
     }
 
@@ -106,17 +138,21 @@ class HumanizedExecutionPolicy:
                 first = self._offset_balloon(action.targets[0])
                 second = self._offset_balloon(action.targets[1])
 
-                # A duo is one atomic engine interaction. Apply one human
-                # reaction delay before noticing/dispatching the pair, then
-                # preserve FastExecutionPolicy's near-simultaneous click_pair
-                # dispatch. The engine's 750 ms duo wall therefore cannot be
-                # violated by two independent reaction sleeps.
-                pair_delay = self._reaction_delay_s(
+                # The duo wall applies to the pair delta, not just reaction
+                # time to the first click. Keep both sampled delays inside
+                # 150–300 ms, so the total first->second delay is bounded by
+                # 300–600 ms and remains inside the engine's 750 ms window.
+                first_delay_s = self._reaction_delay_s(
                     first.target_type,
                     is_twin_second=False,
                     combo_eligible=False,
                 )
-                time.sleep(pair_delay)
+                second_delay_s = self._reaction_delay_s(
+                    second.target_type,
+                    is_twin_second=True,
+                    combo_eligible=False,
+                )
+                time.sleep(first_delay_s)
 
                 twin = replace(action, targets=(first, second))
                 pair_decision = replace(
@@ -129,7 +165,10 @@ class HumanizedExecutionPolicy:
                 pair_result = self._fast.tick(
                     pair_decision,
                     context,
-                    input_backend,
+                    _DelayedTwinInputBackend(
+                        input_backend,
+                        second_delay_s,
+                    ),
                 )
                 combined = self._combine(combined, pair_result)
                 continue
@@ -270,6 +309,7 @@ class HumanizedExecutionPolicy:
                 gaussian_median_ms=median_ms,
                 gaussian_sigma_ms=sigma_ms,
                 ar1=ar1,
+                ar1_applied_to="reaction_delay",
                 warmup_factor=warmup_factor,
                 fatigue_factor=fatigue_factor,
                 final_delay_ms=actual_ms,
