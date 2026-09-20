@@ -8,6 +8,7 @@ from behavior.fast_policy import FastExecutionPolicy
 from diagnostics.downstream import DownstreamDiagnostic
 from game_profiles.balloon_types import BalloonAction, TwinAction
 from telemetry.outcome import SessionOutcome
+from behavior.profile import HumanProfile
 from .execution_policy import (
     BalloonExecutionResult,
     ExecutionContext,
@@ -34,9 +35,14 @@ class HumanizedExecutionPolicy:
     ) -> None:
         self._diagnostic = diagnostic
         self._rng = rng or random.Random()
+        self._profile: HumanProfile | None = None
         self._fast = FastExecutionPolicy(
             diagnostic=diagnostic,
         )
+
+    def set_profile(self, profile: HumanProfile) -> None:
+        """Bind the immutable per-session profile used by endpoint sampling."""
+        self._profile = profile
 
     def tick(
         self,
@@ -84,8 +90,9 @@ class HumanizedExecutionPolicy:
         radius = max(0.0, float(action.target_width) * 0.5)
         max_offset = max(0.0, radius - self._RADIUS_SAFETY_MARGIN_PX)
 
-        dx = self._rng.gauss(0.0, self._OFFSET_SIGMA_PX)
-        dy = self._rng.gauss(0.0, self._OFFSET_SIGMA_PX)
+        sigma = self._profile.spatial_sigma_px if self._profile is not None else self._OFFSET_SIGMA_PX
+        dx = self._rng.gauss(0.0, sigma)
+        dy = self._rng.gauss(0.0, sigma)
         magnitude = math.hypot(dx, dy)
         clipped = magnitude > max_offset and max_offset > 0.0
         if clipped:
@@ -122,6 +129,7 @@ class HumanizedExecutionPolicy:
                 offset=[offset_x, offset_y],
                 offset_px=math.hypot(offset_x, offset_y),
                 sampled_offset_px=magnitude,
+                profile_spatial_sigma_px=sigma,
                 target_radius_px=radius,
                 safe_radius_px=max_offset,
                 clipped=clipped or (offset_x != round(dx) or offset_y != round(dy)),
