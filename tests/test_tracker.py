@@ -45,6 +45,17 @@ class TestTracker(unittest.TestCase):
         self.assertEqual(track.position, (100, 100))
         self.assertEqual(track.color, "red")
 
+    def test_stores_first_frame_capture_timestamp(self):
+        tracker = self._make_tracker(max_distance=50)
+        det = self._make_detection(100, 100)
+        tracks = tracker.update([det], capture_timestamp=123.456)
+        track = next(iter(tracks.values()))
+        self.assertEqual(track.capture_timestamp, 123.456)
+
+        tracks = tracker.update([self._make_detection(105, 105)], capture_timestamp=200.0)
+        track = next(iter(tracks.values()))
+        self.assertEqual(track.capture_timestamp, 123.456)
+
     def test_updates_existing_track(self):
         tracker = self._make_tracker(max_distance=50)
         det1 = self._make_detection(100, 100)
