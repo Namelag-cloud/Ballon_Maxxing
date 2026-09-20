@@ -94,6 +94,25 @@ class TestExecutionPolicyPhaseA(unittest.TestCase):
         )
         self.assertEqual(self.input.downs, [0.0, 0.0])
 
+    def test_fast_policy_logs_frame_capture_timestamp(self):
+        policy = FastExecutionPolicy(clock=self.clock)
+        action = balloon_action(
+            TargetType.NORMAL_BALLOON,
+            BalloonColor.BLUE,
+            (100, 100),
+            50,
+        )
+        action["metadata"]["first_seen_timestamp"] = 123.456
+        decision = self.engine.decide([action])
+
+        self.clock.value = 200.0
+        result = policy.tick(decision, self._context(), self.input)
+
+        self.assertEqual(result.clicks_sent, 1)
+        self.assertEqual(len(result.outcomes), 1)
+        self.assertEqual(result.outcomes[0].target_first_seen_ts, 123.456)
+        self.assertEqual(result.outcomes[0].actual_click_down_ts, 200.0)
+
     def test_executor_uses_injected_humanized_policy_without_fallback(self):
         executor = BalloonExecutor(
             FakeBehavior(),
