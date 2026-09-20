@@ -82,6 +82,10 @@ class BalloonExecutor:
         self._current_mouse = position
 
     @property
+    def current_mouse_position(self) -> tuple[int, int]:
+        return self._current_mouse
+
+    @property
     def latest_g(self) -> BalloonAction | None:
         return self._latest_g
 
