@@ -6,7 +6,6 @@ from typing import Protocol
 from decision.mechanics import DecisionResult as BalloonFrameDecision
 from game_profiles.balloon_types import BalloonAction, TwinAction
 from telemetry.outcome import SessionOutcome
-from telemetry.timing import now_monotonic
 from behavior.action_scheduler import ActionTimestamps, TwinActionCompletion
 
 
@@ -84,7 +83,3 @@ class ExecutionPolicy(Protocol):
         reason: str,
     ) -> tuple[SessionOutcome, ...]:
         ...
-
-
-def default_execution_clock() -> float:
-    return now_monotonic()
