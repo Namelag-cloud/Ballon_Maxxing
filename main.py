@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import argparse
 import ctypes
 import ctypes.wintypes
@@ -814,8 +815,19 @@ class Application:
                         duration_s=self._duration,
                         current_mouse_position=self._balloon_executor.current_mouse_position,
                     )
+                    execution_decision = (
+                        self._balloon_frame_decision
+                        if new_actions_allowed
+                        else replace(
+                            self._balloon_frame_decision,
+                            actions=(),
+                            g_action=None,
+                            notifications=(),
+                            multicolor_specials=(),
+                        )
+                    )
                     execution = self._balloon_executor.execute(
-                        self._balloon_frame_decision,
+                        execution_decision,
                         execution_context,
                         self._input_backend,
                     )
