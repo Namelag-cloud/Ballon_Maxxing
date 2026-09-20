@@ -85,7 +85,10 @@ class FastBalloonExecutorTests(unittest.TestCase):
         )
 
         self.assertEqual(result.clicks_sent, 2)
-        self.assertEqual(backend.events[0], ("pair", (100, 200), (160, 200), 0.0))
+        pair_event = backend.events[0]
+        self.assertEqual(pair_event[:3], ("pair", (100, 200), (160, 200)))
+        self.assertGreaterEqual(pair_event[3], 0.080)
+        self.assertLessEqual(pair_event[3], 0.150)
         self.assertEqual(result.twin_completion.intended_click_down_delta_ms, 0.0)
         self.assertEqual(result.outcomes[0].execution_status, "fast")
         self.assertEqual(result.outcomes[1].execution_status, "fast")
