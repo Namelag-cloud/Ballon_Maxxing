@@ -7,6 +7,7 @@ import random
 from behavior.fast_policy import FastExecutionPolicy
 from diagnostics.downstream import DownstreamDiagnostic
 from game_profiles.balloon_types import BalloonAction, TwinAction
+from telemetry.outcome import SessionOutcome
 from .execution_policy import (
     BalloonExecutionResult,
     ExecutionContext,
