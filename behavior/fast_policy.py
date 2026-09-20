@@ -12,12 +12,12 @@ from telemetry.timing import now_monotonic
 
 # Inter-click timing controls for already-planned action sequences.
 # Tune these independently when experimenting with different cadence profiles.
-NORMAL_CLICK_GAP_RANGE_S = (0.055, 0.110)
+NORMAL_CLICK_GAP_RANGE_S = (0.080, 0.110)
 G_PRECURSOR_CLICK_GAP_RANGE_S = (0.080, 0.140)
 SUPER_G_CLICK_GAP_RANGE_S = (0.100, 0.220)
 MULTICOLOR_SPECIAL_CLICK_GAP_RANGE_S = (0.080, 0.140)
-TWIN_CLICK_GAP_RANGE_S = (0.080, 0.250)
-NORMAL_CLICK_OFFSET_PX_RANGE = (-4, 4)
+TWIN_CLICK_GAP_RANGE_S = (0.080, 0.150)
+NORMAL_CLICK_OFFSET_PX_RANGE = (-2, 2)
 
 from .execution_policy import (
     BalloonExecutionResult,
