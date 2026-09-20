@@ -200,6 +200,13 @@ class Application:
             )
             if execution_policy is not None and hasattr(execution_policy, "set_profile"):
                 execution_policy.set_profile(self._behavior.profile)
+            if self._diagnostic:
+                self._diagnostic.log(
+                    "session_profile",
+                    profile_seed=self._behavior.profile_seed,
+                    behavioral_seed=self._behavior.behavioral_seed,
+                    profile=self._behavior.profile.as_dict(),
+                )
             self._action_scheduler = ActionScheduler()
             if self._game_profile and self._game_profile.game_type == GameType.BALLOON_GAME:
                 self._balloon_executor = BalloonExecutor(
