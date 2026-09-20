@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 
+SEQUENTIAL_CLICK_GAP_S = 0.040
+
 from behavior.action_scheduler import ActionTimestamps, TwinActionCompletion
 from behavior.model import BehavioralAction
 from diagnostics.downstream import DownstreamDiagnostic
@@ -113,8 +115,14 @@ class FastExecutionPolicy:
 
         self._prune_recent_fast_clicks()
         seen_ids: set[int] = set()
+        dispatched_primary_actions = 0
 
         for action in actions:
+            # The vision/decision layer can surface several visible targets in
+            # the same frame. Dispatch them as a rapid human-like sequence
+            # rather than issuing one uninterrupted burst of clicks.
+            if dispatched_primary_actions:
+                time.sleep(SEQUENTIAL_CLICK_GAP_S)
             if isinstance(action, TwinAction):
                 first, second = action.targets
                 pair_ids = (first.target_id, second.target_id)
@@ -199,6 +207,7 @@ class FastExecutionPolicy:
                     )
                 )
                 completed_primary_action = action
+                dispatched_primary_actions += 1
                 seen_ids.update(
                     target_id for target_id in pair_ids if target_id is not None
                 )
@@ -233,6 +242,7 @@ class FastExecutionPolicy:
             clicks += 1
             input_timestamp = action_timestamps.click_up
             completed_primary_action = action
+            dispatched_primary_actions += 1
             outcomes.append(
                 self._make_outcome(
                     behavioral_action,
