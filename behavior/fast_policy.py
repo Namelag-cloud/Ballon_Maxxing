@@ -78,6 +78,7 @@ class FastExecutionPolicy:
             g_behavior = self._fast_behavioral_action(
                 g_screen,
                 g_action.target_width,
+                acquisition_timestamp=g_action.metadata.get("first_seen_timestamp"),
             )
             g_ts = self._fast_click(input_backend, g_screen)
             clicks += 1
@@ -137,10 +138,12 @@ class FastExecutionPolicy:
                 first_behavior = self._fast_behavioral_action(
                     first_xy,
                     first.target_width,
+                    acquisition_timestamp=first.metadata.get("first_seen_timestamp"),
                 )
                 second_behavior = self._fast_behavioral_action(
                     second_xy,
                     second.target_width,
+                    acquisition_timestamp=second.metadata.get("first_seen_timestamp"),
                 )
                 first_down, first_up, second_down, second_up = input_backend.click_pair(
                     first_xy,
@@ -228,6 +231,7 @@ class FastExecutionPolicy:
             behavioral_action = self._fast_behavioral_action(
                 screen_xy,
                 action.target_width,
+                acquisition_timestamp=action.metadata.get("first_seen_timestamp"),
             )
             action_timestamps = self._fast_click(input_backend, screen_xy)
             clicks += 1
@@ -340,6 +344,7 @@ class FastExecutionPolicy:
     def _fast_behavioral_action(
         screen_xy: tuple[int, int],
         target_width: float,
+        acquisition_timestamp: float | None = None,
     ) -> BehavioralAction:
         now = time.perf_counter()
         return BehavioralAction(
@@ -362,7 +367,7 @@ class FastExecutionPolicy:
             warmup_factor=0.0,
             fatigue_factor=0.0,
             planned_at=now,
-            acquisition_timestamp=None,
+            acquisition_timestamp=acquisition_timestamp,
             scheduler_delay_s=0.0,
         )
 
