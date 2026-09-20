@@ -1290,6 +1290,22 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+
+def resolve_policy_name(args, settings: Settings, game_profile: Optional[GameProfile]) -> str:
+    """Resolve explicit policy > --fast > live-balloon auto-fast > fast default."""
+    if args.policy is not None:
+        return args.policy
+    if args.fast:
+        return "fast"
+    if (
+        settings.mode == RunMode.LIVE
+        and game_profile is not None
+        and game_profile.game_type == GameType.BALLOON_GAME
+    ):
+        return "fast"
+    return "fast"
+
+
 def main():
     args = parse_args()
 
@@ -1344,19 +1360,7 @@ def main():
         print("Verbose decisions: enabled")
     print()
 
-    explicit_policy = args.policy
-    if explicit_policy is not None:
-        policy_name = explicit_policy
-    elif args.fast:
-        policy_name = "fast"
-    elif (
-        settings.mode == RunMode.LIVE
-        and game_profile is not None
-        and game_profile.game_type == GameType.BALLOON_GAME
-    ):
-        policy_name = "fast"
-    else:
-        policy_name = "fast"
+    policy_name = resolve_policy_name(args, settings, game_profile)
 
     diagnostic = (
         DownstreamDiagnostic()
