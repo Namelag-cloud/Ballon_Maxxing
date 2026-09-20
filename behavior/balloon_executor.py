@@ -90,6 +90,10 @@ class BalloonExecutor:
     ) -> BalloonExecutionResult:
         return self._policy.tick(decision, context, input_backend)
 
+    def shutdown(self, input_backend, reason: str) -> tuple[SessionOutcome, ...]:
+        """Finalize the active execution policy at session end."""
+        return self._policy.shutdown(input_backend, reason)
+
     def tick(
         self,
         actions,
