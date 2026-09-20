@@ -171,10 +171,14 @@ class TestBalloonExecutionIntegration(unittest.TestCase):
         ])
         result = executor.tick(decision.actions, None, self.input, 0, 0, True)
         self.assertEqual(result.clicks_sent, 3)
-        self.assertEqual(
-            [(x, y) for _, x, y in self.input.moves],
-            [(100, 100), (200, 200), (300, 300)],
-        )
+        # Fast policy applies the configured humanization offset to normal clicks.
+        # Verify the click remains within the current +/-2 px endpoint range.
+        expected = [(100, 100), (200, 200), (300, 300)]
+        actual = [(x, y) for _, x, y in self.input.moves]
+        self.assertEqual(len(actual), len(expected))
+        for (x, y), (expected_x, expected_y) in zip(actual, expected):
+            self.assertLessEqual(abs(x - expected_x), 2)
+            self.assertLessEqual(abs(y - expected_y), 2)
         self.assertEqual(len(self.input.downs), 3)
 
     def test_fast_execution_suppresses_recently_clicked_normal_target(self):
