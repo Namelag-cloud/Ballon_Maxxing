@@ -56,18 +56,18 @@ class BehavioralModel:
         if seed is None:
             seed = int.from_bytes(os.urandom(8), "little", signed=False) & 0x7FFFFFFF
         self._rng = SeededRNG(seed)
+        # The profile sampler is intentionally independent of the behavioral
+        # RNG and always seeded from fresh session entropy. A fixed config seed
+        # can therefore reproduce per-click draws without reproducing the
+        # session's human profile.
+        profile_seed = int.from_bytes(os.urandom(8), "little", signed=False) & 0x7FFFFFFF
+        self._profile_rng = SeededRNG(profile_seed)
+        self._profile_seed = profile_seed
         self._config = config
-        self._profile = HumanProfile.sample(self._rng, {
-            "reaction_sigma": config.human_profile.reaction_sigma,
+        self._profile = HumanProfile.sample(self._profile_rng, {
             "reaction_ar1": config.human_profile.reaction_ar1,
             "perception_min": config.human_profile.perception_min_ticks,
             "perception_max": config.human_profile.perception_max_ticks,
-            "spatial_sigma_pct_min": config.human_profile.spatial_sigma_pct_min,
-            "spatial_sigma_pct_max": config.human_profile.spatial_sigma_pct_max,
-            "miss_rate_min": config.human_profile.miss_rate_min,
-            "miss_rate_max": config.human_profile.miss_rate_max,
-            "notif_hit_rate_min": config.human_profile.notif_hit_rate_min,
-            "notif_hit_rate_max": config.human_profile.notif_hit_rate_max,
             "duo_delta_min_ms": config.human_profile.duo_delta_min_ms,
             "duo_delta_max_ms": config.human_profile.duo_delta_max_ms,
             "duo_y_variance_multiplier": config.human_profile.duo_y_variance_multiplier,
@@ -77,8 +77,6 @@ class BehavioralModel:
             "balloon_g_abandon_rate_max": config.human_profile.balloon_g_abandon_rate_max,
             "idle_lambda_min": config.human_profile.idle_lambda_min,
             "idle_lambda_max": config.human_profile.idle_lambda_max,
-            "start_delay_min_s": config.human_profile.start_delay_min_s,
-            "start_delay_max_s": config.human_profile.start_delay_max_s,
             "warmup_min_s": config.human_profile.warmup_min_s,
             "warmup_max_s": config.human_profile.warmup_max_s,
             "fatigue_min_ticks_per_min": config.human_profile.fatigue_min_ticks_per_min,
@@ -87,8 +85,6 @@ class BehavioralModel:
             "fat_finger_multiplier": config.human_profile.fat_finger_multiplier,
             "gemini_without_notification_probability": config.human_profile.gemini_without_notification_probability,
             "final_activity_cutoff_s": config.human_profile.final_activity_cutoff_s,
-            "early_exit_prob_min": config.human_profile.early_exit_prob_min,
-            "early_exit_prob_max": config.human_profile.early_exit_prob_max,
             "early_exit_ratio_min": config.human_profile.early_exit_ratio_min,
             "early_exit_ratio_max": config.human_profile.early_exit_ratio_max,
         })
@@ -120,6 +116,10 @@ class BehavioralModel:
     @property
     def behavioral_seed(self) -> int:
         return self._rng.seed
+
+    @property
+    def profile_seed(self) -> int:
+        return self._profile_seed
 
     @property
     def start_delay_s(self) -> float:
