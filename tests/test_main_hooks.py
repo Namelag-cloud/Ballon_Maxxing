@@ -10,7 +10,7 @@ class TestMouseHookStruct(unittest.TestCase):
     def test_matches_msllhookstruct_layout(self):
         self.assertEqual(
             ctypes.sizeof(_MouseHookStruct),
-            20 + ctypes.sizeof(ctypes.c_void_p),
+            ((20 + ctypes.sizeof(ctypes.c_void_p) - 1) // ctypes.sizeof(ctypes.c_void_p) * ctypes.sizeof(ctypes.c_void_p) + ctypes.sizeof(ctypes.c_void_p)),
         )
 
         fields = {name for name, _ in _MouseHookStruct._fields_}
