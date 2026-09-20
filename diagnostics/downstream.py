@@ -22,6 +22,7 @@ class DownstreamDiagnostic:
         self._click_to_next_decision_ms: list[float] = []
         self._followup_status_counts: dict[str, int] = {}
         self._state_transition_count = 0
+        self._click_timing_samples: list[dict[str, Any]] = []
 
     @property
     def frame_log_duration_ms(self) -> float:
@@ -51,6 +52,8 @@ class DownstreamDiagnostic:
                     self._followup_status_counts[str(status)] = self._followup_status_counts.get(str(status), 0) + 1
             elif event == "decision_state_transition":
                 self._state_transition_count += 1
+            elif event == "click_timing":
+                self._click_timing_samples.append(dict(data))
             record = {
                 "seq": self._seq,
                 "t_mono": time.perf_counter(),
@@ -72,9 +75,53 @@ class DownstreamDiagnostic:
             click_to_next_capture_ms=self._stats(self._click_to_next_capture_ms),
             click_to_next_decision_ms=self._stats(self._click_to_next_decision_ms),
             click_followup_status_counts=dict(self._followup_status_counts),
+            click_execution_timing=self._click_timing_summary(),
             state_transition_count=self._state_transition_count,
         )
         self._stream.close()
+
+    def _click_timing_summary(self) -> dict:
+        def summarize(samples: list[dict[str, Any]]) -> dict:
+            metric_names = (
+                "movement_ms",
+                "click_hold_ms",
+                "input_total_ms",
+                "inter_click_down_gap_ms",
+            )
+            result = {"count": len(samples)}
+            for metric in metric_names:
+                values = [
+                    float(sample[metric])
+                    for sample in samples
+                    if isinstance(sample.get(metric), (int, float))
+                ]
+                result[metric] = self._stats(values)
+            result["total_input_ms"] = sum(
+                float(sample["input_total_ms"])
+                for sample in samples
+                if isinstance(sample.get("input_total_ms"), (int, float))
+            )
+            return result
+
+        by_kind: dict[str, list[dict[str, Any]]] = {}
+        by_lane: dict[str, list[dict[str, Any]]] = {}
+        for sample in self._click_timing_samples:
+            kind = str(sample.get("click_kind", "unknown"))
+            lane = str(sample.get("lane", "unknown"))
+            by_kind.setdefault(kind, []).append(sample)
+            by_lane.setdefault(lane, []).append(sample)
+
+        return {
+            "overall": summarize(self._click_timing_samples),
+            "by_click_kind": {
+                key: summarize(value)
+                for key, value in sorted(by_kind.items())
+            },
+            "by_lane": {
+                key: summarize(value)
+                for key, value in sorted(by_lane.items())
+            },
+        }
 
     @staticmethod
     def _stats(values: list[float]) -> dict:
