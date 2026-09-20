@@ -66,6 +66,14 @@ class BehavioralModel:
         self._config = config
         self._profile = HumanProfile.sample(self._profile_rng, {
             "reaction_ar1": config.human_profile.reaction_ar1,
+            "miss_rate_min": config.human_profile.miss_rate_min,
+            "miss_rate_max": config.human_profile.miss_rate_max,
+            "notif_hit_rate_min": config.human_profile.notif_hit_rate_min,
+            "notif_hit_rate_max": config.human_profile.notif_hit_rate_max,
+            "start_delay_min_s": config.human_profile.start_delay_min_s,
+            "start_delay_max_s": config.human_profile.start_delay_max_s,
+            "early_exit_prob_min": config.human_profile.early_exit_prob_min,
+            "early_exit_prob_max": config.human_profile.early_exit_prob_max,
             "perception_min": config.human_profile.perception_min_ticks,
             "perception_max": config.human_profile.perception_max_ticks,
             "duo_delta_min_ms": config.human_profile.duo_delta_min_ms,
