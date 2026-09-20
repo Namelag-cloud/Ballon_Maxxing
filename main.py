@@ -812,7 +812,7 @@ class Application:
                         region_top=region.top,
                         input_enabled=self._input_enabled,
                         duration_s=self._duration,
-                        current_mouse_position=self._balloon_executor._current_mouse,
+                        current_mouse_position=self._balloon_executor.current_mouse_position,
                     )
                     execution = self._balloon_executor.execute(
                         self._balloon_frame_decision,
