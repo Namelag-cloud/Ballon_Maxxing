@@ -39,10 +39,11 @@ class FastExecutionPolicy:
         context: ExecutionContext,
         input_backend: InputBackend,
     ) -> BalloonExecutionResult:
+        now = self._clock()
         if self._diagnostic:
             self._diagnostic.log(
                 "executor_frame",
-                now=context.now,
+                now=now,
                 actions=[self._action_info(a) for a in decision.actions],
                 g_action=self._action_info(decision.g_action),
                 notifications=[self._action_info(a) for a in decision.notifications],
