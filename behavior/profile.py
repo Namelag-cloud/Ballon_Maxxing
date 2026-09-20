@@ -57,8 +57,11 @@ class HumanProfile:
         def clipped_normal(mean: float, sigma: float, low: float, high: float) -> float:
             return max(low, min(high, rng.normal(mean, sigma)))
 
-        def beta_bounded(a: float, b: float, low: float, high: float) -> float:
-            return low + rng.beta(a, b) * (high - low)
+        def beta_bounded(mean: float, low: float, high: float, concentration: float = 12.0) -> float:
+            normalized_mean = (mean - low) / (high - low)
+            alpha = max(0.1, normalized_mean * concentration)
+            beta = max(0.1, (1.0 - normalized_mean) * concentration)
+            return low + rng.beta(alpha, beta) * (high - low)
 
         return cls(
             # These are sampled once per session from meta-distributions.
@@ -67,8 +70,8 @@ class HumanProfile:
             perception_ticks=uniform("perception", 2.0, 5.0),
             spatial_sigma_pct=uniform("spatial_sigma_pct", 0.10, 0.22),
             spatial_sigma_px=clipped_normal(5.0, 1.5, 1.0, 10.0),
-            miss_rate=beta_bounded(2.0, 98.0, 0.005, 0.05),
-            notif_hit_rate=beta_bounded(2.0, 398.0, 0.0, 0.02),
+            miss_rate=beta_bounded(0.02, 0.005, 0.05),
+            notif_hit_rate=beta_bounded(0.005, 0.0, 0.02),
             duo_delta_mu_ms=positive_lognormal("duo_delta", 150.0, 0.25, 75.0, 300.0),
             duo_delta_sigma=float(cfg.get("duo_delta_sigma", 0.4)),
             duo_delta_min_ms=float(cfg.get("duo_delta_min_ms", 50.0)),
