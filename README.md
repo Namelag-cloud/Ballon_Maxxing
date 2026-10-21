@@ -2,7 +2,7 @@
 
 A screen-only computer-vision bot for a 60-second browser balloon game.
 
-Google_Max watches the game through the rendered screen, identifies targets, tracks them across frames, understands game-specific mechanics, and sends Windows mouse input to play the game.
+This watches the game through the rendered screen, identifies targets, tracks them across frames, understands game-specific mechanics, and sends Windows mouse input to play the game.
 
 The core pipeline is:
 
@@ -78,7 +78,7 @@ The execution layer turns those decisions into mouse actions.
 
 # Why I Built This
 
-The first version of Google_Max started with handwritten computer-vision heuristics.
+The first version started with handwritten computer-vision heuristics.
 
 That worked surprisingly well for obvious balloons.
 
