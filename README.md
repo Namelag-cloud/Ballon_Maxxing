@@ -1,4 +1,4 @@
-# Google_Max
+# Ballon_Maxxing
 
 A screen-only computer-vision bot for a 60-second browser balloon game.
 
